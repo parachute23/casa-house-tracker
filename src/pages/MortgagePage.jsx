@@ -20,6 +20,7 @@ export default function MortgagePage() {
   const [payments, setPayments] = useState([])
   const [state, setState] = useState({ itau: null, beacon: null })
   const [loading, setLoading] = useState(true)
+  const [profiles, setProfiles] = useState([])
   const [purchaseCosts, setPurchaseCosts] = useState([])
   const [activeTab, setActiveTab] = useState('overview')
   const [showForm, setShowForm] = useState(null) // 'itau' | 'beacon'
@@ -29,23 +30,27 @@ export default function MortgagePage() {
   const [balanceInput, setBalanceInput] = useState('')
   const [monthlyInput, setMonthlyInput] = useState('')
   const [form, setForm] = useState({
-    loan_type: 'itau',
-    payment_date: format(new Date(), 'yyyy-MM-dd'),
-    amount: '',
-    payment_type: 'regular',
-    notes: ''
-  })
+  loan_type: 'itau',
+  payment_date: format(new Date(), 'yyyy-MM-dd'),
+  amount: '',
+  payment_type: 'regular',
+  paid_by: '',
+  notes: ''
+})
 
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
-    const [{ data: p }, { data: s }, { data: c }] = await Promise.all([
+    const [{ data: p }, { data: s }, { data: c }, { data: pr }] = await Promise.all([
   supabase.from('mortgage_payments').select('*').order('payment_date', { ascending: false }),
   supabase.from('mortgage_state').select('*'),
-  supabase.from('purchase_costs').select('*').order('payment_date', { ascending: true })
+  supabase.from('purchase_costs').select('*').order('payment_date', { ascending: true }),
+  supabase.from('profiles').select('*')
 ])
 setPayments(p || [])
 setPurchaseCosts(c || [])
+setProfiles(pr || [])
+    
 const stateMap = {}
 ;(s || []).forEach(row => { stateMap[row.loan_type] = row })
 setState(stateMap)
@@ -176,10 +181,19 @@ setLoading(false)
                   <option value="extraordinary">Extraordinary (principal reduction)</option>
                 </select>
               </div>
-              <div className="form-group" style={{ gridColumn: 'span 3' }}>
-                <label className="form-label">NOTES</label>
-                <input className="form-input" placeholder="e.g. Parcela 3/400, amortização extra…" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
-              </div>
+              
+              <div className="form-group">
+  <label className="form-label">PAID BY</label>
+  <select className="form-select" value={form.paid_by} onChange={e => setForm(f => ({ ...f, paid_by: e.target.value }))}>
+    <option value="">Select…</option>
+    {profiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+  </select>
+</div>
+<div className="form-group" style={{ gridColumn: 'span 2' }}>
+  <label className="form-label">NOTES</label>
+  <input className="form-input" placeholder="e.g. Parcela 3/400, amortização extra…" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+</div>
+              
             </div>
             <div style={{ display: 'flex', gap: '0.5rem' }}>
               <button className="btn btn-primary" type="submit">Save</button>
@@ -337,6 +351,36 @@ setLoading(false)
             </div>
           </div>
 
+          {/* Who Paid What - mortgage */}
+{payments.length > 0 && (() => {
+  const contribMap = {}
+  profiles.forEach(p => { contribMap[p.id] = { name: p.full_name, itau: 0, beacon: 0 } })
+  payments.forEach(p => {
+    if (p.paid_by && contribMap[p.paid_by]) {
+      if (p.loan_type === 'itau') contribMap[p.paid_by].itau += p.amount
+      else contribMap[p.paid_by].beacon += p.amount
+    }
+  })
+  const contributors = Object.values(contribMap).filter(p => p.itau > 0 || p.beacon > 0)
+  if (contributors.length === 0) return null
+  return (
+    <div className="card" style={{ marginBottom: '1.5rem' }}>
+      <div className="card-title">💑 Who Paid What — Mortgage</div>
+      {contributors.map((person, i) => (
+        <div key={i} style={{ marginBottom: '0.75rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem', marginBottom: '0.25rem' }}>
+            <span>{person.name}</span>
+            <span style={{ color: '#c8a96e' }}>{fmt(person.itau + person.beacon)}</span>
+          </div>
+          <div style={{ fontSize: '0.75rem', color: '#5a5060', display: 'flex', gap: '1rem' }}>
+            {person.itau > 0 && <span>🏦 Itaú: {fmt(person.itau)}</span>}
+            {person.beacon > 0 && <span>🏫 Beacon: {fmt(person.beacon)}</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+})()}
           {/* Total house cost */}
           <div className="card">
             <div className="card-title">📊 Total House Cost To Date</div>
@@ -393,15 +437,20 @@ setLoading(false)
             <div className="empty-state"><div className="empty-icon">🏦</div><div className="empty-text">No payments logged yet</div></div>
           ) : (
             <table className="table">
+              
               <thead>
-                <tr><th>Date</th><th>Amount</th><th>Type</th><th>Notes</th><th>Receipt</th><th></th></tr>
-              </thead>
+  <tr><th>Date</th><th>Amount</th><th>Paid By</th><th>Type</th><th>Notes</th><th>Receipt</th><th></th></tr>
+</thead>
+              
               <tbody>
                 {itauPayments.map(p => (
                   <tr key={p.id}>
                     <td>{p.payment_date}</td>
+                    
                     <td style={{ color: p.payment_type === 'extraordinary' ? '#c8a96e' : '#4caf88', fontFamily: "'Cormorant Garamond', serif", fontSize: '1.05rem' }}>{fmtFull(p.amount)}</td>
-                    <td><span className={`badge ${p.payment_type === 'extraordinary' ? 'badge-amber' : 'badge-green'}`}>{p.payment_type === 'extraordinary' ? '⚡ Extra' : 'Regular'}</span></td>
+<td style={{ color: '#8a8090', fontSize: '0.8rem' }}>{profiles.find(pr => pr.id === p.paid_by)?.full_name || '—'}</td>
+<td><span className={`badge ${p.payment_type === 'extraordinary' ? 'badge-amber' : 'badge-green'}`}>{p.payment_type === 'extraordinary' ? '⚡ Extra' : 'Regular'}</span></td>
+                    
                     <td style={{ color: '#8a8090', fontSize: '0.8rem' }}>{p.notes || '—'}</td>
                     <td>{p.drive_file_url ? <a href={p.drive_file_url} target="_blank" rel="noreferrer" style={{ color: '#c8a96e', fontSize: '0.78rem' }}>📄 View</a> : '—'}</td>
                     <td><button onClick={() => deletePayment(p.id)} style={{ background: 'none', border: 'none', color: '#5a5060', cursor: 'pointer', fontSize: '0.75rem' }}>✕</button></td>
