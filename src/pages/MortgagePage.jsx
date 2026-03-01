@@ -20,6 +20,7 @@ export default function MortgagePage() {
   const [payments, setPayments] = useState([])
   const [state, setState] = useState({ itau: null, beacon: null })
   const [loading, setLoading] = useState(true)
+  const [purchaseCosts, setPurchaseCosts] = useState([])
   const [activeTab, setActiveTab] = useState('overview')
   const [showForm, setShowForm] = useState(null) // 'itau' | 'beacon'
   const [paymentFile, setPaymentFile] = useState(null)
@@ -38,15 +39,17 @@ export default function MortgagePage() {
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
-    const [{ data: p }, { data: s }] = await Promise.all([
-      supabase.from('mortgage_payments').select('*').order('payment_date', { ascending: false }),
-      supabase.from('mortgage_state').select('*')
-    ])
-    setPayments(p || [])
-    const stateMap = {}
-    ;(s || []).forEach(row => { stateMap[row.loan_type] = row })
-    setState(stateMap)
-    setLoading(false)
+    const [{ data: p }, { data: s }, { data: c }] = await Promise.all([
+  supabase.from('mortgage_payments').select('*').order('payment_date', { ascending: false }),
+  supabase.from('mortgage_state').select('*'),
+  supabase.from('purchase_costs').select('*').order('payment_date', { ascending: true })
+])
+setPayments(p || [])
+setPurchaseCosts(c || [])
+const stateMap = {}
+;(s || []).forEach(row => { stateMap[row.loan_type] = row })
+setState(stateMap)
+setLoading(false)
   }
 
   const itauPayments = payments.filter(p => p.loan_type === 'itau')
@@ -188,7 +191,7 @@ export default function MortgagePage() {
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: '0.25rem', marginBottom: '1.5rem', borderBottom: '1px solid rgba(200,169,110,0.1)' }}>
-        {['overview', 'itaú', 'beacon', 'history'].map(tab => (
+        {['overview', 'purchase', 'itaú', 'beacon', 'history'].map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)} style={{
             background: 'none', border: 'none', cursor: 'pointer', padding: '0.5rem 1rem',
             fontSize: '0.82rem', fontFamily: "'DM Sans', sans-serif",
@@ -196,7 +199,7 @@ export default function MortgagePage() {
             borderBottom: activeTab === tab ? '2px solid #c8a96e' : '2px solid transparent',
             marginBottom: '-1px', fontWeight: activeTab === tab ? 500 : 400, letterSpacing: '0.04em'
           }}>
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === 'purchase' ? '🏡 Purchase' : tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
       </div>
@@ -339,10 +342,10 @@ export default function MortgagePage() {
             <div className="card-title">📊 Total House Cost To Date</div>
             <div className="grid-4">
               {[
-                { label: 'Down Payment', value: fmt(DOWN_PAYMENT) },
-                { label: 'Itaú Payments', value: fmt(itauTotal), color: '#4caf88' },
-                { label: 'Beacon Payments', value: fmt(beaconTotal), color: '#4caf88' },
-                { label: 'Total Invested', value: fmt(DOWN_PAYMENT + itauTotal + beaconTotal), color: '#c8a96e' }
+                { label: 'Purchase Costs', value: fmt(purchaseCosts.reduce((s, c) => s + c.amount, 0)), color: '#c8a96e' },
+{ label: 'Itaú Payments', value: fmt(itauTotal), color: '#4caf88' },
+{ label: 'Beacon Payments', value: fmt(beaconTotal), color: '#4caf88' },
+{ label: 'Total Invested', value: fmt(purchaseCosts.reduce((s, c) => s + c.amount, 0) + itauTotal + beaconTotal), color: '#c8a96e' }
               ].map((s, i) => (
                 <div key={i}>
                   <div className="stat-label">{s.label}</div>
@@ -354,6 +357,34 @@ export default function MortgagePage() {
         </div>
       )}
 
+{/* PURCHASE COSTS TAB */}
+{activeTab === 'purchase' && (
+  <div>
+    <div className="card" style={{ marginBottom: '1.5rem' }}>
+      <div className="card-title">🏡 One-Time Purchase Costs</div>
+      <table className="table">
+        <thead>
+          <tr><th>Date</th><th>Description</th><th>Paid By</th><th>Amount</th></tr>
+        </thead>
+        <tbody>
+          {purchaseCosts.map(c => (
+            <tr key={c.id}>
+              <td>{c.payment_date}</td>
+              <td>{c.description}</td>
+              <td style={{ color: '#8a8090' }}>{c.paid_by}</td>
+              <td style={{ color: '#c8a96e', fontFamily: "'Cormorant Garamond', serif", fontSize: '1.05rem' }}>{fmt(c.amount)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid rgba(200,169,110,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: '0.85rem', color: '#8a8090' }}>Total purchase costs</span>
+        <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '1.3rem', color: '#c8a96e' }}>{fmt(purchaseCosts.reduce((s, c) => s + c.amount, 0))}</span>
+      </div>
+    </div>
+  </div>
+)}
+      
       {/* ITAÚ TAB */}
       {activeTab === 'itaú' && (
         <div className="card">
