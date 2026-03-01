@@ -1,15 +1,17 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { uploadBillFile, uploadContractFile, requestDriveAccess, uploadPaymentFile } from '../lib/googleDrive'
-import { extractBillData, generateCostEstimate, extractContractLineItems } from '../lib/ai'
+import { extractBillData, generateCostEstimate, extractContractLineItems, extractBoletoDetails } from '../lib/ai'
+import { parseProtocoloExcel, matchFilesToItems, generateWhatsAppMessage, openWhatsApp } from '../lib/protocolo'
 import toast from 'react-hot-toast'
 import { useDropzone } from 'react-dropzone'
 import { format } from 'date-fns'
-import { Sparkles, ArrowLeft, Plus, Trash2 } from 'lucide-react'
+import { Sparkles, ArrowLeft, Plus, Trash2, Send } from 'lucide-react'
 
 const fmt = (n) => 'R$ ' + (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+const fmtDate = (d) => d ? d.split('-').reverse().join('/') : '—'
 
 const ANTHROPIC_API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY
 
@@ -20,7 +22,6 @@ async function extractPixData(file) {
     r.onerror = rej
     r.readAsDataURL(file)
   })
-
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -30,34 +31,26 @@ async function extractPixData(file) {
       'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({
-      model: 'claude-opus-4-5',
+      model: 'claude-sonnet-4-6',
       max_tokens: 500,
       messages: [{
         role: 'user',
         content: [
-          {
-            type: 'image',
-            source: { type: 'base64', media_type: file.type, data: base64 }
-          },
-          {
-            type: 'text',
-            text: `This is a Brazilian PIX payment confirmation screen. Extract the payment details and return ONLY valid JSON, no markdown:
+          { type: 'image', source: { type: 'base64', media_type: file.type, data: base64 } },
+          { type: 'text', text: `This is a Brazilian PIX payment confirmation. Extract and return ONLY valid JSON:
 {
-  "amount": number (the value in BRL, no currency symbol),
+  "amount": number,
   "payment_date": "YYYY-MM-DD",
-  "recipient_name": "string (favorecido/destinatário)",
-  "notes": "string (e.g. PIX para [recipient] - [transaction id if visible])"
-}`
-          }
+  "recipient_name": "string",
+  "notes": "string (e.g. PIX para [recipient])"
+}` }
         ]
       }]
     })
   })
-
   const data = await response.json()
   if (data.error) throw new Error(data.error.message)
-  const text = data.content[0].text
-  return JSON.parse(text.replace(/```json|```/g, '').trim())
+  return JSON.parse(data.content[0].text.replace(/```json|```/g, '').trim())
 }
 
 export default function ProjectDetailPage() {
@@ -80,6 +73,14 @@ export default function ProjectDetailPage() {
   const [processingReceipt, setProcessingReceipt] = useState(false)
   const [estimate, setEstimate] = useState(null)
   const [loadingEstimate, setLoadingEstimate] = useState(false)
+
+  // Protocolo state
+  const [protocoloFiles, setProtocoloFiles] = useState([])
+  const [protocoloItems, setProtocoloItems] = useState([])
+  const [protocoloStep, setProtocoloStep] = useState('upload') // upload | review | done
+  const [processingProtocolo, setProcessingProtocolo] = useState(false)
+  const [savingProtocolo, setSavingProtocolo] = useState(false)
+
   const [paymentForm, setPaymentForm] = useState({
     amount: '', payment_date: format(new Date(), 'yyyy-MM-dd'),
     notes: '', paid_by: '', payment_method: 'PIX'
@@ -112,6 +113,17 @@ export default function ProjectDetailPage() {
   const totalExpenses = bills.reduce((s, b) => s + b.total_amount, 0)
   const remaining = budget - totalPaid
   const pctComplete = budget > 0 ? Math.min(totalPaid / budget * 100, 100) : 0
+
+  // Protocolo dropzone - accepts all files
+  const protocoloDropzone = useDropzone({
+    accept: {
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': [],
+      'application/vnd.ms-excel': [],
+      'application/pdf': [],
+      'image/*': []
+    },
+    onDrop: files => setProtocoloFiles(prev => [...prev, ...files])
+  })
 
   const billDropzone = useDropzone({
     accept: { 'application/pdf': [], 'image/*': [] },
@@ -151,6 +163,171 @@ export default function ProjectDetailPage() {
     }
   })
 
+  async function processProtocolo() {
+    const excelFile = protocoloFiles.find(f =>
+      f.name.endsWith('.xlsx') || f.name.endsWith('.xls')
+    )
+    if (!excelFile) {
+      toast.error('Please include the Excel file (.xlsx)')
+      return
+    }
+
+    setProcessingProtocolo(true)
+    toast('Reading Protocolo…', { icon: '📋' })
+
+    try {
+      // Parse Excel
+      let items = await parseProtocoloExcel(excelFile)
+
+      // Match boletos and NFs to items
+      const pdfFiles = protocoloFiles.filter(f => f.name.endsWith('.pdf') || f.type.startsWith('image/'))
+      items = matchFilesToItems(items, pdfFiles)
+
+      // Extract linha digitável from boletos using AI
+      const itemsWithBoleto = items.filter(i => i.boleto_file)
+      if (itemsWithBoleto.length > 0) {
+        toast(`Reading ${itemsWithBoleto.length} boleto(s) with AI…`, { icon: '🤖' })
+        await Promise.all(
+          itemsWithBoleto.map(async (item, idx) => {
+            try {
+              const details = await extractBoletoDetails(item.boleto_file)
+              items[items.indexOf(item)].linha_digitavel = details.linha_digitavel
+            } catch (err) {
+              console.warn('Could not extract boleto details:', err)
+            }
+          })
+        )
+      }
+
+      setProtocoloItems(items)
+      setProtocoloStep('review')
+      toast.success(`${items.length} payment items found`)
+    } catch (err) {
+      toast.error('Failed to process Protocolo: ' + err.message)
+    } finally {
+      setProcessingProtocolo(false)
+    }
+  }
+
+  function assignItem(idx, assignedTo) {
+    setProtocoloItems(prev => prev.map((item, i) =>
+      i === idx ? { ...item, assigned_to: assignedTo } : item
+    ))
+  }
+
+  async function saveProtocolo() {
+    setSavingProtocolo(true)
+    const protocolName = `Protocolo ${protocoloItems[0]?.protocol_number || '?'}`
+
+    try {
+      // 1. Save each item as a bill in supabase
+      for (const item of protocoloItems) {
+        let boleto_drive_url = null
+        let nf_drive_url = null
+
+        // Upload files to Drive if available
+        if (item.boleto_file && project.drive_folder_id) {
+          try {
+            await requestDriveAccess()
+            const uploaded = await uploadBillFile(item.boleto_file, project.drive_folder_id, `Boleto-${item.supplier}-${item.due_date}`)
+            boleto_drive_url = uploaded.webViewLink
+          } catch (e) { console.warn('Drive upload failed', e) }
+        }
+        if (item.nf_file && project.drive_folder_id) {
+          try {
+            await requestDriveAccess()
+            const uploaded = await uploadBillFile(item.nf_file, project.drive_folder_id, `NF-${item.supplier}-${item.due_date}`)
+            nf_drive_url = uploaded.webViewLink
+          } catch (e) { console.warn('NF Drive upload failed', e) }
+        }
+
+        await supabase.from('bills').insert({
+          project_id: id,
+          contractor_name: item.supplier,
+          bill_number: item.invoice_number,
+          issue_date: item.due_date,
+          due_date: item.due_date,
+          total_amount: item.amount,
+          status: item.status === 'PAGO' ? 'paid' : 'pending',
+          notes: [
+            item.category,
+            item.payment_method,
+            item.linha_digitavel ? `Linha digitável: ${item.linha_digitavel}` : null,
+            item.assigned_to ? `Responsável: ${item.assigned_to === 'pati' ? 'Patricia' : 'Jorge'}` : null,
+            protocolName
+          ].filter(Boolean).join(' · '),
+          drive_file_url: boleto_drive_url || nf_drive_url
+        })
+      }
+
+      // 2. Create Google Calendar event
+      try {
+        await createCalendarEvent(protocoloItems, protocolName)
+        toast.success('Calendar event created!')
+      } catch (e) {
+        toast.error('Calendar event failed: ' + e.message)
+      }
+
+      // 3. Open WhatsApp if any items assigned to Pati
+      const msg = generateWhatsAppMessage(protocoloItems, protocolName)
+      if (msg) {
+        toast('Opening WhatsApp for Pati…', { icon: '💬' })
+        setTimeout(() => openWhatsApp(msg), 1000)
+      }
+
+      toast.success(`${protocolName} saved!`)
+      setProtocoloStep('done')
+      setProtocoloFiles([])
+      loadData()
+    } catch (err) {
+      toast.error('Failed to save: ' + err.message)
+    } finally {
+      setSavingProtocolo(false)
+    }
+  }
+
+  async function createCalendarEvent(items, protocolName) {
+    // Find earliest due date
+    const dueDates = items.map(i => i.due_date).filter(Boolean).sort()
+    if (dueDates.length === 0) return
+
+    const eventDate = dueDates[0]
+    const total = items.reduce((s, i) => s + i.amount, 0)
+    const pendingItems = items.filter(i => i.status !== 'PAGO')
+
+    const description = [
+      `${protocolName} — ${pendingItems.length} pagamentos pendentes`,
+      `Total: ${fmt(total)}`,
+      '',
+      ...pendingItems.map(item => [
+        `• ${item.supplier}`,
+        `  Valor: ${fmt(item.amount)}`,
+        `  Vencimento: ${fmtDate(item.due_date)}`,
+        `  Forma: ${item.payment_method || '—'}`,
+        item.linha_digitavel ? `  Linha: ${item.linha_digitavel}` : null,
+        `  Responsável: ${item.assigned_to === 'pati' ? 'Patricia' : item.assigned_to === 'jorge' ? 'Jorge' : 'A definir'}`
+      ].filter(Boolean).join('\n'))
+    ].join('\n')
+
+    await fetch('https://gcal.mcp.claude.com/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        method: 'tools/call',
+        params: {
+          name: 'gcal_create_event',
+          arguments: {
+            summary: `🏠 Casa — ${protocolName} — ${fmt(total)} a pagar`,
+            description,
+            start_time: `${eventDate}T09:00:00`,
+            end_time: `${eventDate}T09:30:00`,
+            reminders: [{ method: 'popup', minutes: 1440 }, { method: 'popup', minutes: 120 }]
+          }
+        }
+      })
+    })
+  }
+
   async function uploadContract() {
     if (!contractFile) return
     setUploadingContract(true)
@@ -185,9 +362,7 @@ export default function ProjectDetailPage() {
         const uploaded = await uploadPaymentFile(paymentFile, project.drive_folder_id, `PIX-${paymentForm.payment_date}-${paymentForm.amount}`)
         drive_file_id = uploaded.id
         drive_file_url = uploaded.webViewLink
-      } catch (err) {
-        toast.error('Drive upload failed — payment will be saved without receipt')
-      }
+      } catch {}
     }
     const { error } = await supabase.from('payments').insert({
       project_id: id,
@@ -223,7 +398,7 @@ export default function ProjectDetailPage() {
         notes: extracted.notes || '',
         status: 'pending'
       })
-      toast.success('Invoice details extracted — review and save')
+      toast.success('Invoice details extracted')
       window._extractedBillLineItems = extracted.line_items
     } catch (err) {
       toast.error('AI extraction failed: ' + err.message)
@@ -251,18 +426,6 @@ export default function ProjectDetailPage() {
       drive_file_url
     }).select().single()
     if (error) { toast.error(error.message); return }
-    const aiLineItems = window._extractedBillLineItems
-    if (aiLineItems?.length) {
-      await supabase.from('bill_line_items').insert(
-        aiLineItems.map(item => ({
-          bill_id: bill.id,
-          description: item.description,
-          amount: item.amount,
-          is_deviation: false
-        }))
-      )
-      window._extractedBillLineItems = null
-    }
     toast.success('Expense saved')
     setShowExpenseForm(false)
     setBillFile(null)
@@ -297,6 +460,13 @@ export default function ProjectDetailPage() {
     if (contribMap[pid]) contribMap[pid].total += p.amount
   })
 
+  const pendingBills = bills.filter(b => b.status === 'pending')
+  const dueSoon = pendingBills.filter(b => {
+    if (!b.due_date) return false
+    const days = (new Date(b.due_date) - new Date()) / (1000 * 60 * 60 * 24)
+    return days <= 7 && days >= 0
+  })
+
   return (
     <div>
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -317,12 +487,23 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
+      {/* Due soon alert */}
+      {dueSoon.length > 0 && (
+        <div style={{ background: 'rgba(232,168,76,0.1)', border: '1px solid rgba(232,168,76,0.3)', borderRadius: '10px', padding: '0.75rem 1rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span>⚠️</span>
+          <span style={{ fontSize: '0.85rem', color: '#e8a84c' }}>
+            <strong>{dueSoon.length} payment{dueSoon.length > 1 ? 's' : ''} due within 7 days:</strong>{' '}
+            {dueSoon.map(b => `${b.contractor_name} ${fmt(b.total_amount)}`).join(', ')}
+          </span>
+        </div>
+      )}
+
       {/* KPI Cards */}
       <div className="grid-4" style={{ marginBottom: '1.5rem' }}>
         {[
           { label: 'Contract Value', value: fmt(budget) },
           { label: 'Total Paid', value: fmt(totalPaid), color: '#4caf88' },
-          { label: 'Expenses / Invoices', value: fmt(totalExpenses), color: totalExpenses > 0 ? '#e8a84c' : undefined },
+          { label: 'Pending Bills', value: fmt(pendingBills.reduce((s,b) => s+b.total_amount, 0)), color: pendingBills.length > 0 ? '#e8a84c' : undefined },
           { label: 'Remaining', value: fmt(remaining), color: remaining < 0 ? '#e05c6a' : undefined }
         ].map((s, i) => (
           <div key={i} className="card">
@@ -369,8 +550,8 @@ export default function ProjectDetailPage() {
       )}
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: '0.25rem', marginBottom: '1.5rem', borderBottom: '1px solid rgba(200,169,110,0.1)' }}>
-        {['payments', 'expenses', 'contract', 'estimate'].map(tab => (
+      <div style={{ display: 'flex', gap: '0.25rem', marginBottom: '1.5rem', borderBottom: '1px solid rgba(200,169,110,0.1)', flexWrap: 'wrap' }}>
+        {['payments', 'protocolo', 'pending', 'expenses', 'contract', 'estimate'].map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)} style={{
             background: 'none', border: 'none', cursor: 'pointer', padding: '0.5rem 1rem',
             fontSize: '0.82rem', fontFamily: "'DM Sans', sans-serif",
@@ -379,7 +560,10 @@ export default function ProjectDetailPage() {
             marginBottom: '-1px', transition: 'color 0.15s',
             fontWeight: activeTab === tab ? 500 : 400, letterSpacing: '0.04em'
           }}>
-            {tab === 'estimate' ? '🤖 AI Estimate' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === 'estimate' ? '🤖 AI Estimate' :
+             tab === 'protocolo' ? '📋 Protocolo' :
+             tab === 'pending' ? `⏳ Pending${pendingBills.length > 0 ? ` (${pendingBills.length})` : ''}` :
+             tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
       </div>
@@ -388,12 +572,9 @@ export default function ProjectDetailPage() {
       {showPaymentForm && (
         <div className="card" style={{ marginBottom: '1.5rem', border: '1px solid rgba(76,175,136,0.3)' }}>
           <div className="card-title">💳 Log Payment</div>
-
-          {/* Receipt upload */}
           <div {...receiptDropzone.getRootProps()} style={{
             border: `2px dashed ${receiptDropzone.isDragActive ? '#c8a96e' : 'rgba(200,169,110,0.25)'}`,
-            borderRadius: '10px', padding: '1.25rem', textAlign: 'center',
-            cursor: 'pointer', marginBottom: '1rem', background: paymentFile ? 'rgba(76,175,136,0.05)' : 'transparent'
+            borderRadius: '10px', padding: '1.25rem', textAlign: 'center', cursor: 'pointer', marginBottom: '1rem'
           }}>
             <input {...receiptDropzone.getInputProps()} />
             {processingReceipt ? (
@@ -401,12 +582,9 @@ export default function ProjectDetailPage() {
             ) : paymentFile ? (
               <div style={{ color: '#4caf88', fontSize: '0.85rem' }}>✅ {paymentFile.name} — form filled automatically</div>
             ) : (
-              <div style={{ color: '#5a5060', fontSize: '0.85rem' }}>
-                📱 Drop your PIX confirmation screenshot here — AI will fill the form automatically
-              </div>
+              <div style={{ color: '#5a5060', fontSize: '0.85rem' }}>📱 Drop PIX screenshot — AI fills form automatically</div>
             )}
           </div>
-
           <form onSubmit={savePayment}>
             <div className="grid-3" style={{ gap: '1rem', marginBottom: '1rem' }}>
               <div className="form-group">
@@ -455,7 +633,7 @@ export default function ProjectDetailPage() {
                 </button>
               </div>
             ) : (
-              <div style={{ color: '#5a5060', fontSize: '0.85rem' }}>📄 Drop invoice here (PDF or photo) — AI will fill the form</div>
+              <div style={{ color: '#5a5060', fontSize: '0.85rem' }}>📄 Drop invoice here — AI will fill the form</div>
             )}
           </div>
           <form onSubmit={saveExpense}>
@@ -492,7 +670,7 @@ export default function ProjectDetailPage() {
         <div className="card">
           <div className="card-title">💳 Payment History</div>
           {payments.length === 0 ? (
-            <div className="empty-state"><div className="empty-icon">💳</div><div className="empty-text">No payments yet — click "Log Payment" above</div></div>
+            <div className="empty-state"><div className="empty-icon">💳</div><div className="empty-text">No payments yet</div></div>
           ) : (
             <table className="table">
               <thead>
@@ -505,10 +683,10 @@ export default function ProjectDetailPage() {
                     <td style={{ color: '#4caf88', fontFamily: "'Cormorant Garamond', serif", fontSize: '1.05rem' }}>{fmt(p.amount)}</td>
                     <td>{p.paid_by?.full_name || '—'}</td>
                     <td style={{ color: '#8a8090' }}>{p.payment_method || '—'}</td>
-                    <td style={{ color: '#8a8090' }}>{p.notes || '—'}</td>
+                    <td style={{ color: '#8a8090', fontSize: '0.8rem' }}>{p.notes || '—'}</td>
                     <td>{p.drive_file_url ? <a href={p.drive_file_url} target="_blank" rel="noreferrer" style={{ color: '#c8a96e', fontSize: '0.78rem' }}>📱 View</a> : '—'}</td>
                     <td>
-                      <button onClick={() => deletePayment(p.id)} style={{ background: 'none', border: 'none', color: '#5a5060', cursor: 'pointer', padding: '0.2rem' }} title="Delete">
+                      <button onClick={() => deletePayment(p.id)} style={{ background: 'none', border: 'none', color: '#5a5060', cursor: 'pointer', padding: '0.2rem' }}>
                         <Trash2 size={14} />
                       </button>
                     </td>
@@ -520,18 +698,195 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
+      {/* PROTOCOLO TAB */}
+      {activeTab === 'protocolo' && (
+        <div>
+          {protocoloStep === 'upload' && (
+            <div className="card">
+              <div className="card-title">📋 Upload Protocolo</div>
+              <div style={{ color: '#8a8090', fontSize: '0.85rem', marginBottom: '1rem' }}>
+                Drop all files at once: the Excel spreadsheet + all boleto PDFs + all NF PDFs
+              </div>
+              <div {...protocoloDropzone.getRootProps()} style={{
+                border: `2px dashed ${protocoloDropzone.isDragActive ? '#c8a96e' : 'rgba(200,169,110,0.25)'}`,
+                borderRadius: '12px', padding: '2rem', textAlign: 'center', cursor: 'pointer', marginBottom: '1rem'
+              }}>
+                <input {...protocoloDropzone.getInputProps()} />
+                <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📂</div>
+                <div style={{ color: '#8a8090', fontSize: '0.85rem' }}>
+                  {protocoloDropzone.isDragActive ? 'Drop files here…' : 'Drop Excel + Boletos + NFs here, or click to select'}
+                </div>
+              </div>
+              {protocoloFiles.length > 0 && (
+                <div style={{ marginBottom: '1rem' }}>
+                  <div style={{ fontSize: '0.78rem', color: '#8a8090', marginBottom: '0.5rem' }}>{protocoloFiles.length} file(s) selected:</div>
+                  {protocoloFiles.map((f, i) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.3rem 0', fontSize: '0.8rem', borderBottom: '1px solid rgba(200,169,110,0.08)' }}>
+                      <span style={{ color: f.name.endsWith('.xlsx') || f.name.endsWith('.xls') ? '#c8a96e' : '#8a8090' }}>
+                        {f.name.endsWith('.xlsx') || f.name.endsWith('.xls') ? '📊' : f.name.toUpperCase().includes('NF') ? '🧾' : '📄'} {f.name}
+                      </span>
+                      <button onClick={() => setProtocoloFiles(prev => prev.filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', color: '#5a5060', cursor: 'pointer' }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {protocoloFiles.length > 0 && (
+                <button className="btn btn-primary" onClick={processProtocolo} disabled={processingProtocolo}>
+                  {processingProtocolo ? '⏳ Processing…' : '🤖 Process Protocolo'}
+                </button>
+              )}
+            </div>
+          )}
+
+          {protocoloStep === 'review' && (
+            <div>
+              <div className="card" style={{ marginBottom: '1rem' }}>
+                <div className="card-title">👀 Review & Assign — {protocoloItems[0]?.protocol_number ? `Protocolo ${protocoloItems[0].protocol_number}` : 'Protocolo'}</div>
+                <div style={{ color: '#8a8090', fontSize: '0.85rem', marginBottom: '1rem' }}>
+                  Assign each payment to Jorge or Pati, then confirm to save and send.
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {protocoloItems.map((item, idx) => (
+                    <div key={idx} style={{
+                      background: '#13131f', borderRadius: '10px', padding: '1rem',
+                      border: `1px solid ${item.status === 'PAGO' ? 'rgba(76,175,136,0.2)' : 'rgba(200,169,110,0.15)'}`
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                        <div>
+                          <div style={{ fontWeight: 500, fontSize: '0.95rem' }}>{item.supplier}</div>
+                          <div style={{ fontSize: '0.75rem', color: '#5a5060' }}>
+                            {item.category} · {item.payment_method} · Due {fmtDate(item.due_date)}
+                            {item.invoice_number && ` · NF ${item.invoice_number}`}
+                          </div>
+                          {item.linha_digitavel && (
+                            <div style={{ fontSize: '0.72rem', color: '#8a8090', marginTop: '0.3rem', fontFamily: 'monospace', background: 'rgba(0,0,0,0.2)', padding: '0.25rem 0.5rem', borderRadius: '4px' }}>
+                              {item.linha_digitavel}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.4rem' }}>
+                          <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '1.1rem', color: '#c8a96e' }}>{fmt(item.amount)}</span>
+                          <span className={`badge ${item.status === 'PAGO' ? 'badge-green' : 'badge-amber'}`}>{item.status}</span>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                        <div style={{ fontSize: '0.75rem', color: '#5a5060', marginRight: '0.5rem', alignSelf: 'center' }}>Assign to:</div>
+                        {['jorge', 'pati', null].map(person => (
+                          <button key={String(person)} onClick={() => assignItem(idx, person)} style={{
+                            padding: '0.25rem 0.75rem', borderRadius: '6px', fontSize: '0.78rem', cursor: 'pointer',
+                            border: `1px solid ${item.assigned_to === person ? '#c8a96e' : 'rgba(200,169,110,0.2)'}`,
+                            background: item.assigned_to === person ? 'rgba(200,169,110,0.15)' : 'transparent',
+                            color: item.assigned_to === person ? '#c8a96e' : '#8a8090'
+                          }}>
+                            {person === null ? 'Unassigned' : person === 'jorge' ? '👤 Jorge' : '👤 Pati'}
+                          </button>
+                        ))}
+                        <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.3rem', fontSize: '0.72rem', color: '#5a5060' }}>
+                          {item.boleto_file && <span>📄 Boleto</span>}
+                          {item.nf_file && <span>🧾 NF</span>}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {protocoloItems.some(i => i.assigned_to === 'pati') && (
+                <div style={{ background: 'rgba(76,175,136,0.05)', border: '1px solid rgba(76,175,136,0.2)', borderRadius: '10px', padding: '1rem', marginBottom: '1rem', fontSize: '0.85rem', color: '#4caf88' }}>
+                  💬 WhatsApp will open for Pati with {protocoloItems.filter(i => i.assigned_to === 'pati').length} payment(s) totalling {fmt(protocoloItems.filter(i => i.assigned_to === 'pati').reduce((s,i) => s+i.amount, 0))}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button className="btn btn-primary" onClick={saveProtocolo} disabled={savingProtocolo} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  {savingProtocolo ? '⏳ Saving…' : <><Send size={15} /> Confirm & Send</>}
+                </button>
+                <button className="btn btn-ghost" onClick={() => { setProtocoloStep('upload'); setProtocoloFiles([]) }}>Back</button>
+              </div>
+            </div>
+          )}
+
+          {protocoloStep === 'done' && (
+            <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
+              <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>✅</div>
+              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '1.3rem', marginBottom: '0.5rem' }}>Protocolo saved!</div>
+              <div style={{ color: '#8a8090', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Bills saved · Calendar event created · WhatsApp sent to Pati</div>
+              <button className="btn btn-primary" onClick={() => { setProtocoloStep('upload'); setActiveTab('pending') }}>View Pending Bills</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* PENDING BILLS TAB */}
+      {activeTab === 'pending' && (
+        <div>
+          {pendingBills.length === 0 ? (
+            <div className="card"><div className="empty-state"><div className="empty-icon">✅</div><div className="empty-text">No pending bills</div></div></div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {pendingBills.sort((a,b) => (a.due_date||'').localeCompare(b.due_date||'')).map(bill => {
+                const daysUntil = bill.due_date ? Math.ceil((new Date(bill.due_date) - new Date()) / (1000 * 60 * 60 * 24)) : null
+                const isOverdue = daysUntil !== null && daysUntil < 0
+                const isDueSoon = daysUntil !== null && daysUntil <= 7 && daysUntil >= 0
+
+                // Extract linha digitável from notes
+                const linhaMatch = bill.notes?.match(/Linha digitável: ([^\s·]+(?:\s+[^\s·]+)*?)(?:\s*·|$)/)
+                const linha = linhaMatch ? linhaMatch[1] : null
+
+                return (
+                  <div key={bill.id} className="card" style={{ borderLeft: `3px solid ${isOverdue ? '#e05c6a' : isDueSoon ? '#e8a84c' : 'rgba(200,169,110,0.2)'}` }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 500, marginBottom: '0.25rem' }}>{bill.contractor_name}</div>
+                        <div style={{ fontSize: '0.78rem', color: '#8a8090', marginBottom: '0.25rem' }}>
+                          {bill.due_date ? `Due ${fmtDate(bill.due_date)}` : 'No due date'}
+                          {daysUntil !== null && (
+                            <span style={{ marginLeft: '0.5rem', color: isOverdue ? '#e05c6a' : isDueSoon ? '#e8a84c' : '#5a5060' }}>
+                              {isOverdue ? `${Math.abs(daysUntil)} days overdue` : daysUntil === 0 ? 'Due today!' : `${daysUntil} days`}
+                            </span>
+                          )}
+                        </div>
+                        {bill.notes && <div style={{ fontSize: '0.75rem', color: '#5a5060' }}>{bill.notes.replace(/Linha digitável:.*/, '').trim()}</div>}
+                        {linha && (
+                          <div style={{ marginTop: '0.5rem', background: 'rgba(0,0,0,0.2)', borderRadius: '6px', padding: '0.4rem 0.6rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: '0.72rem', color: '#c8a96e', fontFamily: 'monospace' }}>{linha}</span>
+                            <button onClick={() => { navigator.clipboard.writeText(linha); toast.success('Copied!') }} style={{ background: 'none', border: 'none', color: '#8a8090', cursor: 'pointer', fontSize: '0.72rem' }}>📋 Copy</button>
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.4rem', marginLeft: '1rem' }}>
+                        <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '1.2rem', color: '#c8a96e' }}>{fmt(bill.total_amount)}</span>
+                        {bill.drive_file_url && <a href={bill.drive_file_url} target="_blank" rel="noreferrer" style={{ color: '#8a8090', fontSize: '0.75rem' }}>📄 View</a>}
+                        <button className="btn btn-ghost" style={{ fontSize: '0.75rem', padding: '0.25rem 0.75rem' }}
+                          onClick={async () => {
+                            await supabase.from('bills').update({ status: 'paid' }).eq('id', bill.id)
+                            toast.success('Marked as paid')
+                            loadData()
+                          }}>
+                          ✅ Mark paid
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* EXPENSES TAB */}
       {activeTab === 'expenses' && (
         <div>
-          {bills.length === 0 ? (
-            <div className="card"><div className="empty-state"><div className="empty-icon">🧾</div><div className="empty-text">No expenses yet — click "Add Expense" above</div></div></div>
+          {bills.filter(b => b.status !== 'pending').length === 0 ? (
+            <div className="card"><div className="empty-state"><div className="empty-icon">🧾</div><div className="empty-text">No expenses yet</div></div></div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {bills.map(bill => (
+              {bills.filter(b => b.status !== 'pending').map(bill => (
                 <div key={bill.id} className="card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div>
-                      <div style={{ fontWeight: 500, marginBottom: '0.25rem' }}>{bill.contractor_name || 'Unknown'}{bill.bill_number ? ` — #${bill.bill_number}` : ''}</div>
+                      <div style={{ fontWeight: 500, marginBottom: '0.25rem' }}>{bill.contractor_name}{bill.bill_number ? ` — #${bill.bill_number}` : ''}</div>
                       <div style={{ fontSize: '0.78rem', color: '#8a8090' }}>{bill.issue_date}</div>
                       {bill.notes && <div style={{ fontSize: '0.78rem', color: '#5a5060', marginTop: '0.2rem' }}>{bill.notes}</div>}
                     </div>
@@ -558,15 +913,9 @@ export default function ProjectDetailPage() {
             {project.contractor_name && <div style={{ color: '#8a8090', fontSize: '0.85rem', marginTop: '0.25rem' }}>{project.contractor_name}</div>}
             {project.contract_date && <div style={{ color: '#5a5060', fontSize: '0.8rem' }}>Signed {project.contract_date}</div>}
           </div>
-          <hr className="divider" />
-          <div style={{ color: '#8a8090', fontSize: '0.85rem', marginBottom: '1rem' }}>Upload the contract document to store it in Google Drive.</div>
           <div {...contractDropzone.getRootProps()} style={{ border: `2px dashed ${contractDropzone.isDragActive ? '#c8a96e' : 'rgba(200,169,110,0.25)'}`, borderRadius: '10px', padding: '1.5rem', textAlign: 'center', cursor: 'pointer', marginBottom: '1rem' }}>
             <input {...contractDropzone.getInputProps()} />
-            {contractFile ? (
-              <div style={{ color: '#4caf88', fontSize: '0.85rem' }}>📄 {contractFile.name}</div>
-            ) : (
-              <div style={{ color: '#5a5060', fontSize: '0.85rem' }}>Drop contract here (PDF or photo)</div>
-            )}
+            {contractFile ? <div style={{ color: '#4caf88', fontSize: '0.85rem' }}>📄 {contractFile.name}</div> : <div style={{ color: '#5a5060', fontSize: '0.85rem' }}>Drop contract here</div>}
           </div>
           {contractFile && (
             <button className="btn btn-primary" onClick={uploadContract} disabled={uploadingContract}>
@@ -583,9 +932,7 @@ export default function ProjectDetailPage() {
             <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
               <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>🤖</div>
               <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '1.3rem', marginBottom: '0.5rem' }}>AI Cost Estimation</div>
-              <div style={{ color: '#8a8090', fontSize: '0.85rem', maxWidth: '400px', margin: '0 auto 1.5rem' }}>
-                Claude will analyze your payments and expenses to estimate the final project cost.
-              </div>
+              <div style={{ color: '#8a8090', fontSize: '0.85rem', maxWidth: '400px', margin: '0 auto 1.5rem' }}>Claude will analyze your payments and expenses to estimate the final project cost.</div>
               <button className="btn btn-primary" onClick={getEstimate} disabled={loadingEstimate} style={{ fontSize: '0.9rem', padding: '0.75rem 1.5rem' }}>
                 {loadingEstimate ? '⏳ Analyzing…' : <><Sparkles size={16} /> Generate Estimate</>}
               </button>
@@ -623,7 +970,7 @@ export default function ProjectDetailPage() {
                 </div>
               </div>
               <div style={{ textAlign: 'center', marginTop: '1rem' }}>
-                <button className="btn btn-ghost" onClick={() => { setEstimate(null); getEstimate() }}>🔄 Refresh Estimate</button>
+                <button className="btn btn-ghost" onClick={() => { setEstimate(null); getEstimate() }}>🔄 Refresh</button>
               </div>
             </div>
           )}
