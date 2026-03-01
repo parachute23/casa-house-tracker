@@ -539,6 +539,9 @@ setLoading(false)
         <span style={{ fontSize: '0.85rem', color: '#8a8090' }}>Total</span>
         <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '1.3rem', color: '#c8a96e' }}>{fmt(purchaseCosts.reduce((s, c) => s + c.amount, 0))}</span>
       </div>
+   </div>
+      </div>
+    )}
     </div>
-  </div>
-)}
+  )
+}
