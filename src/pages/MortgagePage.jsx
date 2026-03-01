@@ -127,7 +127,7 @@ setLoading(false)
   const itauState = state.itau
   const beaconState = state.beacon
   const totalPaidToBank = itauTotal + beaconTotal
-  const purchaseCosts = DOWN_PAYMENT // minimum — will add ITBI etc later
+  
 
   return (
     <div>
