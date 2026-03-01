@@ -13,7 +13,7 @@ export function parseProtocoloExcel(file) {
         const lastSheet = workbook.SheetNames[workbook.SheetNames.length - 1]
 ;[lastSheet].forEach(sheetName => {
           const ws = workbook.Sheets[sheetName]
-          const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, dateNF: 'yyyy-mm-dd' })
+          const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, dateNF: 'yyyy-mm-dd' })
 
           let protocolNumber = null
           let headerFound = false
@@ -51,9 +51,9 @@ export function parseProtocoloExcel(file) {
             let parsedAmount = 0
 if (typeof amount === 'string') {
   // Handle Brazilian format: 1.234,56 → 1234.56
-  // Handle "R$ 2.490,00" format
-const cleaned = amount.toString().replace(/R\$\s*/g, '').trim().replace(/\./g, '').replace(',', '.')
-parsedAmount = parseFloat(cleaned)
+  const str = String(amount)
+const cleaned = str.replace(/R\$\s*/gi, '').replace(/\s/g, '').replace(/\./g, '').replace(',', '.')
+parsedAmount = parseFloat(cleaned) || 0
 } else if (typeof amount === 'number') {
   parsedAmount = amount
 } else if (amount instanceof Date) {
