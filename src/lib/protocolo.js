@@ -51,7 +51,9 @@ export function parseProtocoloExcel(file) {
             let parsedAmount = 0
 if (typeof amount === 'string') {
   // Handle Brazilian format: 1.234,56 → 1234.56
-  parsedAmount = parseFloat(amount.replace(/\./g, '').replace(',', '.').replace(/[^0-9.]/g, ''))
+  // Handle "R$ 2.490,00" format
+const cleaned = amount.toString().replace(/R\$\s*/g, '').trim().replace(/\./g, '').replace(',', '.')
+parsedAmount = parseFloat(cleaned)
 } else if (typeof amount === 'number') {
   parsedAmount = amount
 } else if (amount instanceof Date) {
