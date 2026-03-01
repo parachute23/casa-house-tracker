@@ -49,11 +49,15 @@ export function parseProtocoloExcel(file) {
 
             // Parse amount
             let parsedAmount = 0
-            if (typeof amount === 'string') {
-              parsedAmount = parseFloat(amount.replace(/[^0-9,]/g, '').replace(',', '.'))
-            } else {
-              parsedAmount = parseFloat(amount)
-            }
+if (typeof amount === 'string') {
+  // Handle Brazilian format: 1.234,56 → 1234.56
+  parsedAmount = parseFloat(amount.replace(/\./g, '').replace(',', '.').replace(/[^0-9.]/g, ''))
+} else if (typeof amount === 'number') {
+  parsedAmount = amount
+} else if (amount instanceof Date) {
+  // XLSX sometimes misreads numbers as dates — skip
+  parsedAmount = 0
+}
             if (isNaN(parsedAmount) || parsedAmount <= 0) return
 
             // Parse due date
