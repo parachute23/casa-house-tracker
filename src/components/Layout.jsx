@@ -1,6 +1,6 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { Home, Building2, Banknote, LogOut } from 'lucide-react'
+import { Home, Building2, Banknote, LogOut, CreditCard } from 'lucide-react'
 import './Layout.css'
 
 export default function Layout() {
@@ -32,6 +32,9 @@ export default function Layout() {
           </NavLink>
           <NavLink to="/projects" className={({isActive}) => isActive ? 'nav-item active' : 'nav-item'}>
             <Building2 size={18} /> Projects
+          </NavLink>
+          <NavLink to="/payments" className={({isActive}) => isActive ? 'nav-item active' : 'nav-item'}>
+            <CreditCard size={18} /> Payments
           </NavLink>
         </nav>
 
