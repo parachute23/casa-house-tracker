@@ -123,4 +123,18 @@ export async function uploadContractFile(file, projectName, projectFolderId) {
   return await uploadFileToDrive(file, projectFolderId, `Contract - ${projectName}`)
 }
 
-export async function upload
+export async function uploadBillFile(file, projectFolderId, billName) {
+  const billsFolderId = await findOrCreateFolder('Bills', projectFolderId)
+  return await uploadFileToDrive(file, billsFolderId, billName)
+}
+
+export async function uploadPaymentFile(file, projectFolderId, paymentName) {
+  const paymentsFolderId = await findOrCreateFolder('Payment Proofs', projectFolderId)
+  return await uploadFileToDrive(file, paymentsFolderId, paymentName)
+}
+
+export async function uploadMortgagePaymentFile(file, paymentDate) {
+  const mortgageId = localStorage.getItem('gdrive_mortgage_id')
+  const name = `Payment - ${paymentDate}`
+  return await uploadFileToDrive(file, mortgageId, name)
+}
