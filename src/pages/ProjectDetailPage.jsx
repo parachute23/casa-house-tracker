@@ -10,7 +10,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 
 import { format } from 'date-fns'
 import { Sparkles, ArrowLeft, Plus, AlertTriangle, TrendingUp } from 'lucide-react'
 
-const fmt = (n) => (n || 0).toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' €'
+const fmt = (n) => 'R$ ' + (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 
 export default function ProjectDetailPage() {
   const { id } = useParams()
