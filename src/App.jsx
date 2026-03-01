@@ -40,6 +40,7 @@ export default function App() {
             <Route path="projects/new" element={<NewProjectPage />} />
             <Route path="projects/:id" element={<ProjectDetailPage />} />
             <Route path="payments" element={<PaymentsPage />} />
+            <Route path="/mortgage" element={<MortgagePage />} />
           </Route>
         </Routes>
       </BrowserRouter>
