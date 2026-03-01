@@ -135,4 +135,22 @@ Analyze the project data and provide a cost estimate. Return ONLY valid JSON, no
   "confidence_low": number,
   "confidence_high": number,
   "risk_level": "low|medium|high",
-  "key_observations": ["string", "s
+  "key_observations": ["string", "string"],
+    "recommendations": ["string", "string"],
+    "summary": "2-3 sentence plain language summary"
+}`
+
+  const prompt = `Project: ${project.name}
+Status: ${project.status}
+Contract amount: ${totalBudget}
+Total billed so far: ${totalBilled}
+Total paid so far: ${totalPaid}
+
+Deviations by line item:
+${JSON.stringify(deviations, null, 2)}
+
+Based on the deviation patterns observed, construction cost trends, and typical renovation project overruns, provide a final cost estimate.`
+
+  const result = await callClaude(system, prompt)
+  return JSON.parse(result)
+}
