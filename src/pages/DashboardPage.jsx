@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
-import { TrendingUp, AlertTriangle } from 'lucide-react'
+import { TrendingUp } from 'lucide-react'
 
 const fmt = (n) => 'R$ ' + (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 
@@ -23,10 +23,10 @@ export default function DashboardPage() {
       { data: profiles }
     ] = await Promise.all([
       supabase.from('mortgage').select('*').single(),
-      supabase.from('mortgage_payments').select('*, paid_by:profiles(full_name)'),
+      supabase.from('mortgage_payments').select('*, paid_by:profiles(id, full_name)'),
       supabase.from('projects').select('*'),
       supabase.from('bills').select('*'),
-      supabase.from('payments').select('*, paid_by:profiles(full_name, id)'),
+      supabase.from('payments').select('*, paid_by:profiles(id, full_name), project:projects(name)').order('payment_date', { ascending: false }),
       supabase.from('profiles').select('*')
     ])
 
@@ -56,19 +56,14 @@ export default function DashboardPage() {
       .slice(-12)
       .map(([month, amount]) => ({ month: month.slice(5), amount }))
 
-    const deviationProjects = (projects || []).map(proj => {
-      const billed = (bills || []).filter(b => b.project_id === proj.id).reduce((s, b) => s + b.total_amount, 0)
-      const deviation = proj.contract_amount ? ((billed - proj.contract_amount) / proj.contract_amount * 100) : 0
-      return { ...proj, billed, deviation }
-    })
-
     setData({
       mortgage, totalMortgagePaid,
       totalBudget, totalBilled, totalPaid,
       contribs: Object.values(contribMap),
       chartData,
-      projects: deviationProjects,
-      payments
+      projects: projects || [],
+      payments: payments || [],
+      bills: bills || []
     })
     setLoading(false)
   }
@@ -87,8 +82,8 @@ export default function DashboardPage() {
 
       <div className="grid-4" style={{ marginBottom: '1.5rem' }}>
         {[
-          { label: 'Total House Spend', value: fmt(totalSpend), sub: 'all-time', icon: '🏠' },
-          { label: 'Renovation Budget', value: fmt(data.totalBudget), sub: `${fmt(data.totalBilled)} billed`, icon: '🔨' },
+          { label: 'Total House Spend', value: fmt(totalSpend), icon: '🏠' },
+          { label: 'Renovation Budget', value: fmt(data.totalBudget), sub: `${fmt(data.totalBilled)} in expenses`, icon: '🔨' },
           { label: 'Renovation Paid', value: fmt(data.totalPaid), sub: `${fmt(data.totalBudget - data.totalPaid)} remaining`, icon: '✅' },
           { label: 'Mortgage Paid', value: fmt(data.totalMortgagePaid), sub: data.mortgage ? `${fmt(data.mortgage.monthly_payment)}/mo` : 'Not set up', icon: '🏦' },
         ].map((stat, i) => (
@@ -96,7 +91,7 @@ export default function DashboardPage() {
             <div style={{ fontSize: '1.3rem', marginBottom: '0.5rem' }}>{stat.icon}</div>
             <div className="stat-label">{stat.label}</div>
             <div className="stat-value" style={{ fontSize: '1.4rem' }}>{stat.value}</div>
-            <div className="stat-sub">{stat.sub}</div>
+            {stat.sub && <div className="stat-sub">{stat.sub}</div>}
           </div>
         ))}
       </div>
@@ -158,8 +153,9 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-title"><AlertTriangle size={16} /> Renovation Projects — Budget vs. Billed</div>
+      {/* Projects summary */}
+      <div className="card" style={{ marginBottom: '1.5rem' }}>
+        <div className="card-title">🔨 Projects — Budget vs. Paid</div>
         {data.projects.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">🔨</div>
@@ -168,24 +164,47 @@ export default function DashboardPage() {
         ) : (
           <table className="table">
             <thead>
-              <tr>
-                <th>Project</th><th>Status</th><th>Budget</th><th>Billed</th><th>Deviation</th>
-              </tr>
+              <tr><th>Project</th><th>Status</th><th>Budget</th><th>Paid</th><th>Remaining</th></tr>
             </thead>
             <tbody>
               {data.projects.map(proj => {
-                const paid = (data.payments || []).filter(p => p.project_id === proj.id).reduce((s, p) => s + p.amount, 0)
-                const devPct = proj.deviation
+                const paid = data.payments.filter(p => p.project_id === proj.id).reduce((s, p) => s + p.amount, 0)
+                const remaining = (proj.contract_amount || 0) - paid
                 return (
                   <tr key={proj.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/projects/${proj.id}`)}>
                     <td style={{ fontWeight: 500 }}>{proj.name}</td>
                     <td><span className={`badge ${proj.status === 'active' ? 'badge-green' : proj.status === 'completed' ? 'badge-muted' : 'badge-amber'}`}>{proj.status}</span></td>
                     <td>{fmt(proj.contract_amount || 0)}</td>
-                    <td>{fmt(proj.billed)}</td>
-                    <td><span className={devPct > 10 ? 'amount-negative' : devPct > 0 ? 'amount-warning' : 'amount-positive'}>{devPct > 0 ? '+' : ''}{devPct.toFixed(1)}%</span></td>
+                    <td style={{ color: '#4caf88' }}>{fmt(paid)}</td>
+                    <td style={{ color: remaining < 0 ? '#e05c6a' : '#8a8090' }}>{fmt(remaining)}</td>
                   </tr>
                 )
               })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Recent payments */}
+      <div className="card">
+        <div className="card-title">🕐 Recent Payments</div>
+        {data.payments.length === 0 ? (
+          <div className="empty-state"><div className="empty-text">No payments yet</div></div>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr><th>Date</th><th>Project</th><th>Amount</th><th>Paid By</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+              {data.payments.slice(0, 25).map(p => (
+                <tr key={p.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/projects/${p.project_id}`)}>
+                  <td style={{ color: '#8a8090' }}>{p.payment_date}</td>
+                  <td style={{ fontWeight: 500 }}>{p.project?.name || '—'}</td>
+                  <td style={{ color: '#4caf88', fontFamily: "'Cormorant Garamond', serif", fontSize: '1.05rem' }}>{fmt(p.amount)}</td>
+                  <td style={{ color: '#8a8090' }}>{p.paid_by?.full_name || '—'}</td>
+                  <td style={{ color: '#5a5060', fontSize: '0.8rem' }}>{p.notes || '—'}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         )}
