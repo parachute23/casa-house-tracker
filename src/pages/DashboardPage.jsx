@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { TrendingUp, AlertTriangle } from 'lucide-react'
 
-const fmt = (n) => (n || 0).toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' €'
+const fmt = (n) => 'R$ ' + (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 
 export default function DashboardPage() {
   const [data, setData] = useState(null)
