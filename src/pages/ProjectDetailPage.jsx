@@ -2,13 +2,13 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { uploadBillFile, uploadPaymentFile, requestDriveAccess } from '../lib/googleDrive'
-import { extractBillData, generateCostEstimate } from '../lib/ai'
+import { uploadBillFile, uploadPaymentFile, uploadContractFile, requestDriveAccess } from '../lib/googleDrive'
+import { extractBillData, generateCostEstimate, extractContractLineItems } from '../lib/ai'
 import toast from 'react-hot-toast'
 import { useDropzone } from 'react-dropzone'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { format } from 'date-fns'
-import { Sparkles, ArrowLeft, Plus, AlertTriangle, TrendingUp } from 'lucide-react'
+import { Sparkles, ArrowLeft, Plus } from 'lucide-react'
 
 const fmt = (n) => 'R$ ' + (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 
@@ -27,6 +27,8 @@ export default function ProjectDetailPage() {
   const [showPaymentForm, setShowPaymentForm] = useState(false)
   const [billFile, setBillFile] = useState(null)
   const [paymentFile, setPaymentFile] = useState(null)
+  const [contractFile, setContractFile] = useState(null)
+  const [uploadingContract, setUploadingContract] = useState(false)
   const [billForm, setBillForm] = useState({ bill_number: '', contractor_name: '', issue_date: '', due_date: '', total_amount: '', notes: '', status: 'pending' })
   const [paymentForm, setPaymentForm] = useState({ amount: '', payment_date: format(new Date(), 'yyyy-MM-dd'), notes: '', paid_by: '', bill_id: '', payment_method: '' })
   const [estimate, setEstimate] = useState(null)
@@ -86,6 +88,48 @@ export default function ProjectDetailPage() {
     maxFiles: 1,
     onDrop: files => setPaymentFile(files[0])
   })
+
+  const contractDropzone = useDropzone({
+    accept: { 'application/pdf': [], 'image/*': [] },
+    maxFiles: 1,
+    onDrop: files => setContractFile(files[0])
+  })
+
+  async function uploadContract() {
+    if (!contractFile) return
+    setUploadingContract(true)
+    try {
+      if (project.drive_folder_id) {
+        await requestDriveAccess()
+        await uploadContractFile(contractFile, project.name, project.drive_folder_id)
+      }
+      toast('AI is reading your contract…', { icon: '🤖' })
+      const extracted = await extractContractLineItems(contractFile)
+      const updates = {}
+      if (!project.contract_amount && extracted.total_amount) updates.contract_amount = extracted.total_amount
+      if (!project.contractor_name && extracted.contractor_name) updates.contractor_name = extracted.contractor_name
+      if (!project.contract_date && extracted.contract_date) updates.contract_date = extracted.contract_date
+      if (Object.keys(updates).length) await supabase.from('projects').update(updates).eq('id', id)
+      if (extracted.line_items?.length) {
+        await supabase.from('contract_line_items').insert(
+          extracted.line_items.map((item, i) => ({
+            project_id: id,
+            description: item.description,
+            budgeted_amount: item.amount,
+            category: item.category,
+            sort_order: i
+          }))
+        )
+      }
+      toast.success(`Contract processed — ${extracted.line_items?.length || 0} line items extracted`)
+      setContractFile(null)
+      loadData()
+    } catch (err) {
+      toast.error('Contract processing failed: ' + err.message)
+    } finally {
+      setUploadingContract(false)
+    }
+  }
 
   async function processBillWithAI() {
     if (!billFile) return
@@ -233,15 +277,37 @@ export default function ProjectDetailPage() {
 
       {activeTab === 'overview' && (
         <div>
-          {lineItems.length === 0 ? (
-            <div className="card"><div className="empty-state"><div className="empty-icon">📋</div><div className="empty-text">No contract line items — upload a contract when creating a project to extract them automatically</div></div></div>
-          ) : (
+          <div className="card" style={{ marginBottom: '1.5rem' }}>
+            <div className="card-title">📄 Contract Document</div>
+            {lineItems.length > 0 ? (
+              <div style={{ color: '#4caf88', fontSize: '0.85rem' }}>✅ Contract uploaded — {lineItems.length} line items extracted</div>
+            ) : (
+              <div>
+                <div style={{ color: '#8a8090', fontSize: '0.85rem', marginBottom: '1rem' }}>No contract uploaded yet. Upload one to extract line items automatically.</div>
+                <div {...contractDropzone.getRootProps()} style={{ border: `2px dashed ${contractDropzone.isDragActive ? '#c8a96e' : 'rgba(200,169,110,0.25)'}`, borderRadius: '10px', padding: '1.5rem', textAlign: 'center', cursor: 'pointer', marginBottom: '1rem' }}>
+                  <input {...contractDropzone.getInputProps()} />
+                  {contractFile ? (
+                    <div style={{ color: '#4caf88', fontSize: '0.85rem' }}>📄 {contractFile.name}</div>
+                  ) : (
+                    <div style={{ color: '#5a5060', fontSize: '0.85rem' }}>Drop contract here (PDF or photo)</div>
+                  )}
+                </div>
+                {contractFile && (
+                  <button className="btn btn-primary" onClick={uploadContract} disabled={uploadingContract}>
+                    {uploadingContract ? '⏳ Processing…' : '🤖 Upload & Extract with AI'}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {lineItems.length === 0 ? null : (
             <>
               <div className="card" style={{ marginBottom: '1.5rem' }}>
-                <div className="card-title"><AlertTriangle size={16} /> Budget vs. Billed by Line Item</div>
+                <div className="card-title">📊 Budget vs. Billed by Line Item</div>
                 <ResponsiveContainer width="100%" height={200}>
                   <BarChart data={chartData} layout="vertical">
-                    <XAxis type="number" tick={{ fill: '#5a5060', fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => `${v/1000}k€`} />
+                    <XAxis type="number" tick={{ fill: '#5a5060', fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => `${v/1000}k`} />
                     <YAxis dataKey="name" type="category" tick={{ fill: '#8a8090', fontSize: 11 }} axisLine={false} tickLine={false} width={120} />
                     <Tooltip contentStyle={{ background: '#1a1a2c', border: '1px solid rgba(200,169,110,0.2)', borderRadius: 8, color: '#e8dcc8' }} formatter={v => [fmt(v)]} />
                     <Bar dataKey="budget" fill="rgba(200,169,110,0.3)" radius={[0,4,4,0]} name="Budget" />
@@ -288,7 +354,7 @@ export default function ProjectDetailPage() {
               </div>
               <form onSubmit={saveBill}>
                 <div className="grid-3" style={{ gap: '1rem', marginBottom: '1rem' }}>
-                  {[['bill_number','Bill Number','text'],['contractor_name','Contractor','text'],['issue_date','Issue Date','date'],['due_date','Due Date','date'],['total_amount','Total Amount (€)','number']].map(([key, label, type]) => (
+                  {[['bill_number','Bill Number','text'],['contractor_name','Contractor','text'],['issue_date','Issue Date','date'],['due_date','Due Date','date'],['total_amount','Total Amount (R$)','number']].map(([key, label, type]) => (
                     <div className="form-group" key={key}>
                       <label className="form-label">{label.toUpperCase()}</label>
                       <input className="form-input" type={type} value={billForm[key]} onChange={e => setBillForm(f => ({ ...f, [key]: e.target.value }))} required={key === 'total_amount'} />
@@ -352,7 +418,7 @@ export default function ProjectDetailPage() {
               <div className="card-title">+ Log Payment</div>
               <form onSubmit={savePayment}>
                 <div className="grid-3" style={{ gap: '1rem', marginBottom: '1rem' }}>
-                  <div className="form-group"><label className="form-label">AMOUNT (€)</label><input className="form-input" type="number" value={paymentForm.amount} onChange={e => setPaymentForm(f => ({ ...f, amount: e.target.value }))} required /></div>
+                  <div className="form-group"><label className="form-label">AMOUNT (R$)</label><input className="form-input" type="number" value={paymentForm.amount} onChange={e => setPaymentForm(f => ({ ...f, amount: e.target.value }))} required /></div>
                   <div className="form-group"><label className="form-label">DATE</label><input className="form-input" type="date" value={paymentForm.payment_date} onChange={e => setPaymentForm(f => ({ ...f, payment_date: e.target.value }))} required /></div>
                   <div className="form-group">
                     <label className="form-label">PAID BY</label>
