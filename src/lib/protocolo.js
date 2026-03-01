@@ -10,7 +10,8 @@ export function parseProtocoloExcel(file) {
 
         const allItems = []
 
-        workbook.SheetNames.forEach(sheetName => {
+        const lastSheet = workbook.SheetNames[workbook.SheetNames.length - 1]
+;[lastSheet].forEach(sheetName => {
           const ws = workbook.Sheets[sheetName]
           const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, dateNF: 'yyyy-mm-dd' })
 
