@@ -8,6 +8,7 @@ import MortgagePage from './pages/MortgagePage'
 import ProjectsPage from './pages/ProjectsPage'
 import ProjectDetailPage from './pages/ProjectDetailPage'
 import NewProjectPage from './pages/NewProjectPage'
+import PaymentsPage from './pages/PaymentsPage'
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth()
@@ -38,6 +39,7 @@ export default function App() {
             <Route path="projects" element={<ProjectsPage />} />
             <Route path="projects/new" element={<NewProjectPage />} />
             <Route path="projects/:id" element={<ProjectDetailPage />} />
+            <Route path="payments" element={<PaymentsPage />} />
           </Route>
         </Routes>
       </BrowserRouter>
