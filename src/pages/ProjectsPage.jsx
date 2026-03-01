@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { Plus } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
 
 const fmt = (n) => 'R$ ' + (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 
@@ -10,6 +10,7 @@ export default function ProjectsPage() {
   const [bills, setBills] = useState([])
   const [payments, setPayments] = useState([])
   const [loading, setLoading] = useState(true)
+  const [confirmDelete, setConfirmDelete] = useState(null)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -27,6 +28,19 @@ export default function ProjectsPage() {
     load()
   }, [])
 
+  async function deleteProject(project) {
+    // Delete all related data first
+    await supabase.from('payments').delete().eq('project_id', project.id)
+    await supabase.from('bill_line_items').delete().in('bill_id',
+      (bills.filter(b => b.project_id === project.id)).map(b => b.id)
+    )
+    await supabase.from('bills').delete().eq('project_id', project.id)
+    await supabase.from('contract_line_items').delete().eq('project_id', project.id)
+    await supabase.from('projects').delete().eq('id', project.id)
+    setProjects(prev => prev.filter(p => p.id !== project.id))
+    setConfirmDelete(null)
+  }
+
   if (loading) return <div className="empty-state"><div className="empty-text">Loading…</div></div>
 
   const totalBudget = projects.reduce((s, p) => s + (p.contract_amount || 0), 0)
@@ -35,6 +49,27 @@ export default function ProjectsPage() {
 
   return (
     <div>
+      {confirmDelete && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
+        }}>
+          <div className="card" style={{ maxWidth: '400px', width: '90%', textAlign: 'center' }}>
+            <div style={{ fontSize: '1.5rem', marginBottom: '0.75rem' }}>🗑️</div>
+            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '1.2rem', marginBottom: '0.5rem' }}>
+              Delete "{confirmDelete.name}"?
+            </div>
+            <div style={{ color: '#8a8090', fontSize: '0.85rem', marginBottom: '1.5rem' }}>
+              This will permanently delete the project and all its bills, payments, and line items. This cannot be undone.
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+              <button className="btn btn-danger" onClick={() => deleteProject(confirmDelete)}>Yes, delete</button>
+              <button className="btn btn-ghost" onClick={() => setConfirmDelete(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <div className="page-title">Renovation Projects</div>
@@ -79,22 +114,31 @@ export default function ProjectsPage() {
             const deviation = budget > 0 ? ((billed - budget) / budget * 100) : 0
 
             return (
-              <div key={project.id} className="card" style={{ cursor: 'pointer' }} onClick={() => navigate(`/projects/${project.id}`)}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
-                  <div>
-                    <div style={{ fontSize: '1.1rem', fontWeight: 500, marginBottom: '0.25rem' }}>{project.name}</div>
-                    <div style={{ color: '#8a8090', fontSize: '0.8rem' }}>{project.contractor_name || 'No contractor set'}</div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                    {deviation > 10 && <span className="badge badge-red">+{deviation.toFixed(0)}% over</span>}
-                    {deviation > 0 && deviation <= 10 && <span className="badge badge-amber">+{deviation.toFixed(0)}% over</span>}
-                    {deviation <= 0 && budget > 0 && <span className="badge badge-green">On budget</span>}
-                    <span className={`badge ${
-                      project.status === 'active' ? 'badge-green' :
-                      project.status === 'completed' ? 'badge-muted' :
-                      project.status === 'planning' ? 'badge-amber' : 'badge-muted'
-                    }`}>{project.status}</span>
-                  </div>
+              <div key={project.id} className="card" style={{ cursor: 'pointer', position: 'relative' }}
+                onClick={() => navigate(`/projects/${project.id}`)}>
+
+                <button
+                  className="btn btn-danger"
+                  style={{ position: 'absolute', top: '1rem', right: '1rem', padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}
+                  onClick={e => { e.stopPropagation(); setConfirmDelete(project) }}
+                >
+                  <Trash2 size={13} /> Delete
+                </button>
+
+                <div style={{ marginBottom: '1rem', paddingRight: '6rem' }}>
+                  <div style={{ fontSize: '1.1rem', fontWeight: 500, marginBottom: '0.25rem' }}>{project.name}</div>
+                  <div style={{ color: '#8a8090', fontSize: '0.8rem' }}>{project.contractor_name || 'No contractor set'}</div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+                  {deviation > 10 && <span className="badge badge-red">+{deviation.toFixed(0)}% over</span>}
+                  {deviation > 0 && deviation <= 10 && <span className="badge badge-amber">+{deviation.toFixed(0)}% over</span>}
+                  {deviation <= 0 && budget > 0 && <span className="badge badge-green">On budget</span>}
+                  <span className={`badge ${
+                    project.status === 'active' ? 'badge-green' :
+                    project.status === 'completed' ? 'badge-muted' :
+                    project.status === 'planning' ? 'badge-amber' : 'badge-muted'
+                  }`}>{project.status}</span>
                 </div>
 
                 <div className="grid-3" style={{ marginBottom: '1rem' }}>
