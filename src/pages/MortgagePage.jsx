@@ -491,31 +491,54 @@ setLoading(false)
 
       {/* HISTORY TAB - combined */}
       {activeTab === 'history' && (
-        <div className="card">
-          <div className="card-title">📋 All Mortgage Payments</div>
-          {payments.length === 0 ? (
-            <div className="empty-state"><div className="empty-icon">📋</div><div className="empty-text">No payments logged yet</div></div>
-          ) : (
-            <table className="table">
-              <thead>
-                <tr><th>Date</th><th>Loan</th><th>Amount</th><th>Type</th><th>Notes</th><th></th></tr>
-              </thead>
-              <tbody>
-                {payments.map(p => (
-                  <tr key={p.id}>
-                    <td>{p.payment_date}</td>
-                    <td><span className={`badge ${p.loan_type === 'itau' ? 'badge-green' : 'badge-amber'}`}>{p.loan_type === 'itau' ? '🏦 Itaú' : '🏫 Beacon'}</span></td>
-                    <td style={{ color: '#4caf88', fontFamily: "'Cormorant Garamond', serif", fontSize: '1.05rem' }}>{fmtFull(p.amount)}</td>
-                    <td style={{ color: '#8a8090', fontSize: '0.8rem' }}>{p.payment_type === 'extraordinary' ? '⚡ Extra' : 'Regular'}</td>
-                    <td style={{ color: '#8a8090', fontSize: '0.8rem' }}>{p.notes || '—'}</td>
-                    <td><button onClick={() => deletePayment(p.id)} style={{ background: 'none', border: 'none', color: '#5a5060', cursor: 'pointer', fontSize: '0.75rem' }}>✕</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+  <div>
+    <div className="card" style={{ marginBottom: '1.5rem' }}>
+      <div className="card-title">📋 All Mortgage Payments</div>
+      {payments.length === 0 ? (
+        <div className="empty-state"><div className="empty-icon">📋</div><div className="empty-text">No payments logged yet</div></div>
+      ) : (
+        <table className="table">
+          <thead>
+            <tr><th>Date</th><th>Loan</th><th>Amount</th><th>Paid By</th><th>Type</th><th>Notes</th><th></th></tr>
+          </thead>
+          <tbody>
+            {payments.map(p => (
+              <tr key={p.id}>
+                <td>{p.payment_date}</td>
+                <td><span className={`badge ${p.loan_type === 'itau' ? 'badge-green' : 'badge-amber'}`}>{p.loan_type === 'itau' ? '🏦 Itaú' : '🏫 Beacon'}</span></td>
+                <td style={{ color: '#4caf88', fontFamily: "'Cormorant Garamond', serif", fontSize: '1.05rem' }}>{fmtFull(p.amount)}</td>
+                <td style={{ color: '#8a8090', fontSize: '0.8rem' }}>{profiles.find(pr => pr.id === p.paid_by)?.full_name || '—'}</td>
+                <td style={{ color: '#8a8090', fontSize: '0.8rem' }}>{p.payment_type === 'extraordinary' ? '⚡ Extra' : 'Regular'}</td>
+                <td style={{ color: '#8a8090', fontSize: '0.8rem' }}>{p.notes || '—'}</td>
+                <td><button onClick={() => deletePayment(p.id)} style={{ background: 'none', border: 'none', color: '#5a5060', cursor: 'pointer', fontSize: '0.75rem' }}>✕</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </div>
-  )
-}
+
+    <div className="card">
+      <div className="card-title">🏡 Purchase Costs</div>
+      <table className="table">
+        <thead>
+          <tr><th>Date</th><th>Description</th><th>Paid By</th><th>Amount</th></tr>
+        </thead>
+        <tbody>
+          {purchaseCosts.map(c => (
+            <tr key={c.id}>
+              <td>{c.payment_date}</td>
+              <td>{c.description}</td>
+              <td style={{ color: '#8a8090' }}>{c.paid_by}</td>
+              <td style={{ color: '#c8a96e', fontFamily: "'Cormorant Garamond', serif", fontSize: '1.05rem' }}>{fmt(c.amount)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid rgba(200,169,110,0.1)', display: 'flex', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: '0.85rem', color: '#8a8090' }}>Total</span>
+        <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '1.3rem', color: '#c8a96e' }}>{fmt(purchaseCosts.reduce((s, c) => s + c.amount, 0))}</span>
+      </div>
+    </div>
+  </div>
+)}
