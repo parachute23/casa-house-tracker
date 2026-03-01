@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { uploadBillFile, uploadContractFile, requestDriveAccess } from '../lib/googleDrive'
+import { uploadBillFile, uploadContractFile, requestDriveAccess, uploadPaymentFile } from '../lib/googleDrive'
 import { extractBillData, generateCostEstimate, extractContractLineItems } from '../lib/ai'
 import toast from 'react-hot-toast'
 import { useDropzone } from 'react-dropzone'
@@ -10,6 +10,55 @@ import { format } from 'date-fns'
 import { Sparkles, ArrowLeft, Plus, Trash2 } from 'lucide-react'
 
 const fmt = (n) => 'R$ ' + (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+
+const ANTHROPIC_API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY
+
+async function extractPixData(file) {
+  const base64 = await new Promise((res, rej) => {
+    const r = new FileReader()
+    r.onload = () => res(r.result.split(',')[1])
+    r.onerror = rej
+    r.readAsDataURL(file)
+  })
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-opus-4-5',
+      max_tokens: 500,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: { type: 'base64', media_type: file.type, data: base64 }
+          },
+          {
+            type: 'text',
+            text: `This is a Brazilian PIX payment confirmation screen. Extract the payment details and return ONLY valid JSON, no markdown:
+{
+  "amount": number (the value in BRL, no currency symbol),
+  "payment_date": "YYYY-MM-DD",
+  "recipient_name": "string (favorecido/destinatário)",
+  "notes": "string (e.g. PIX para [recipient] - [transaction id if visible])"
+}`
+          }
+        ]
+      }]
+    })
+  })
+
+  const data = await response.json()
+  if (data.error) throw new Error(data.error.message)
+  const text = data.content[0].text
+  return JSON.parse(text.replace(/```json|```/g, '').trim())
+}
 
 export default function ProjectDetailPage() {
   const { id } = useParams()
@@ -20,18 +69,20 @@ export default function ProjectDetailPage() {
   const [payments, setPayments] = useState([])
   const [profiles, setProfiles] = useState([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('overview')
+  const [activeTab, setActiveTab] = useState('payments')
   const [showPaymentForm, setShowPaymentForm] = useState(false)
   const [showExpenseForm, setShowExpenseForm] = useState(false)
   const [billFile, setBillFile] = useState(null)
   const [contractFile, setContractFile] = useState(null)
+  const [paymentFile, setPaymentFile] = useState(null)
   const [uploadingContract, setUploadingContract] = useState(false)
   const [processingBill, setProcessingBill] = useState(false)
+  const [processingReceipt, setProcessingReceipt] = useState(false)
   const [estimate, setEstimate] = useState(null)
   const [loadingEstimate, setLoadingEstimate] = useState(false)
   const [paymentForm, setPaymentForm] = useState({
     amount: '', payment_date: format(new Date(), 'yyyy-MM-dd'),
-    notes: '', paid_by: '', payment_method: ''
+    notes: '', paid_by: '', payment_method: 'PIX'
   })
   const [expenseForm, setExpenseForm] = useState({
     bill_number: '', contractor_name: '', issue_date: '',
@@ -59,8 +110,7 @@ export default function ProjectDetailPage() {
   const budget = project?.contract_amount || 0
   const totalPaid = payments.reduce((s, p) => s + p.amount, 0)
   const totalExpenses = bills.reduce((s, b) => s + b.total_amount, 0)
-  const totalSpent = totalPaid + totalExpenses
-  const remaining = budget - totalSpent
+  const remaining = budget - totalPaid
   const pctComplete = budget > 0 ? Math.min(totalPaid / budget * 100, 100) : 0
 
   const billDropzone = useDropzone({
@@ -73,6 +123,32 @@ export default function ProjectDetailPage() {
     accept: { 'application/pdf': [], 'image/*': [] },
     maxFiles: 1,
     onDrop: files => setContractFile(files[0])
+  })
+
+  const receiptDropzone = useDropzone({
+    accept: { 'image/*': [] },
+    maxFiles: 1,
+    onDrop: async (files) => {
+      const file = files[0]
+      setPaymentFile(file)
+      setProcessingReceipt(true)
+      toast('AI is reading your PIX receipt…', { icon: '🤖' })
+      try {
+        const extracted = await extractPixData(file)
+        setPaymentForm(f => ({
+          ...f,
+          amount: extracted.amount || f.amount,
+          payment_date: extracted.payment_date || f.payment_date,
+          notes: extracted.notes || f.notes,
+          payment_method: 'PIX'
+        }))
+        toast.success('Receipt read — review and confirm')
+      } catch (err) {
+        toast.error('Could not read receipt: ' + err.message)
+      } finally {
+        setProcessingReceipt(false)
+      }
+    }
   })
 
   async function uploadContract() {
@@ -90,7 +166,7 @@ export default function ProjectDetailPage() {
       if (!project.contractor_name && extracted.contractor_name) updates.contractor_name = extracted.contractor_name
       if (!project.contract_date && extracted.contract_date) updates.contract_date = extracted.contract_date
       if (Object.keys(updates).length) await supabase.from('projects').update(updates).eq('id', id)
-      toast.success('Contract uploaded — budget updated!')
+      toast.success('Contract uploaded!')
       setContractFile(null)
       loadData()
     } catch (err) {
@@ -102,19 +178,33 @@ export default function ProjectDetailPage() {
 
   async function savePayment(e) {
     e.preventDefault()
+    let drive_file_id = null, drive_file_url = null
+    if (paymentFile && project.drive_folder_id) {
+      try {
+        await requestDriveAccess()
+        const uploaded = await uploadPaymentFile(paymentFile, project.drive_folder_id, `PIX-${paymentForm.payment_date}-${paymentForm.amount}`)
+        drive_file_id = uploaded.id
+        drive_file_url = uploaded.webViewLink
+      } catch (err) {
+        toast.error('Drive upload failed — payment will be saved without receipt')
+      }
+    }
     const { error } = await supabase.from('payments').insert({
       project_id: id,
       paid_by: paymentForm.paid_by,
       amount: +paymentForm.amount,
       payment_date: paymentForm.payment_date,
       notes: paymentForm.notes,
-      payment_method: paymentForm.payment_method
+      payment_method: paymentForm.payment_method,
+      drive_file_id,
+      drive_file_url
     })
     if (error) toast.error(error.message)
     else {
       toast.success('Payment recorded')
       setShowPaymentForm(false)
-      setPaymentForm({ amount: '', payment_date: format(new Date(), 'yyyy-MM-dd'), notes: '', paid_by: user?.id || '', payment_method: '' })
+      setPaymentFile(null)
+      setPaymentForm({ amount: '', payment_date: format(new Date(), 'yyyy-MM-dd'), notes: '', paid_by: user?.id || '', payment_method: 'PIX' })
       loadData()
     }
   }
@@ -257,7 +347,7 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      {/* Who paid what */}
+      {/* Contributions */}
       {payments.length > 0 && (
         <div className="card" style={{ marginBottom: '1.5rem' }}>
           <div className="card-title">💑 Contributions</div>
@@ -298,6 +388,25 @@ export default function ProjectDetailPage() {
       {showPaymentForm && (
         <div className="card" style={{ marginBottom: '1.5rem', border: '1px solid rgba(76,175,136,0.3)' }}>
           <div className="card-title">💳 Log Payment</div>
+
+          {/* Receipt upload */}
+          <div {...receiptDropzone.getRootProps()} style={{
+            border: `2px dashed ${receiptDropzone.isDragActive ? '#c8a96e' : 'rgba(200,169,110,0.25)'}`,
+            borderRadius: '10px', padding: '1.25rem', textAlign: 'center',
+            cursor: 'pointer', marginBottom: '1rem', background: paymentFile ? 'rgba(76,175,136,0.05)' : 'transparent'
+          }}>
+            <input {...receiptDropzone.getInputProps()} />
+            {processingReceipt ? (
+              <div style={{ color: '#c8a96e', fontSize: '0.85rem' }}>🤖 Reading PIX receipt…</div>
+            ) : paymentFile ? (
+              <div style={{ color: '#4caf88', fontSize: '0.85rem' }}>✅ {paymentFile.name} — form filled automatically</div>
+            ) : (
+              <div style={{ color: '#5a5060', fontSize: '0.85rem' }}>
+                📱 Drop your PIX confirmation screenshot here — AI will fill the form automatically
+              </div>
+            )}
+          </div>
+
           <form onSubmit={savePayment}>
             <div className="grid-3" style={{ gap: '1rem', marginBottom: '1rem' }}>
               <div className="form-group">
@@ -317,7 +426,7 @@ export default function ProjectDetailPage() {
               </div>
               <div className="form-group">
                 <label className="form-label">METHOD</label>
-                <input className="form-input" placeholder="PIX, TED, cash…" value={paymentForm.payment_method} onChange={e => setPaymentForm(f => ({ ...f, payment_method: e.target.value }))} />
+                <input className="form-input" value={paymentForm.payment_method} onChange={e => setPaymentForm(f => ({ ...f, payment_method: e.target.value }))} />
               </div>
               <div className="form-group" style={{ gridColumn: 'span 2' }}>
                 <label className="form-label">NOTES</label>
@@ -326,7 +435,7 @@ export default function ProjectDetailPage() {
             </div>
             <div style={{ display: 'flex', gap: '0.5rem' }}>
               <button className="btn btn-primary" type="submit">Record Payment</button>
-              <button className="btn btn-ghost" type="button" onClick={() => setShowPaymentForm(false)}>Cancel</button>
+              <button className="btn btn-ghost" type="button" onClick={() => { setShowPaymentForm(false); setPaymentFile(null) }}>Cancel</button>
             </div>
           </form>
         </div>
@@ -387,7 +496,7 @@ export default function ProjectDetailPage() {
           ) : (
             <table className="table">
               <thead>
-                <tr><th>Date</th><th>Amount</th><th>Paid By</th><th>Method</th><th>Notes</th><th></th></tr>
+                <tr><th>Date</th><th>Amount</th><th>Paid By</th><th>Method</th><th>Notes</th><th>Receipt</th><th></th></tr>
               </thead>
               <tbody>
                 {payments.map(p => (
@@ -397,6 +506,7 @@ export default function ProjectDetailPage() {
                     <td>{p.paid_by?.full_name || '—'}</td>
                     <td style={{ color: '#8a8090' }}>{p.payment_method || '—'}</td>
                     <td style={{ color: '#8a8090' }}>{p.notes || '—'}</td>
+                    <td>{p.drive_file_url ? <a href={p.drive_file_url} target="_blank" rel="noreferrer" style={{ color: '#c8a96e', fontSize: '0.78rem' }}>📱 View</a> : '—'}</td>
                     <td>
                       <button onClick={() => deletePayment(p.id)} style={{ background: 'none', border: 'none', color: '#5a5060', cursor: 'pointer', padding: '0.2rem' }} title="Delete">
                         <Trash2 size={14} />
@@ -414,7 +524,7 @@ export default function ProjectDetailPage() {
       {activeTab === 'expenses' && (
         <div>
           {bills.length === 0 ? (
-            <div className="card"><div className="empty-state"><div className="empty-icon">🧾</div><div className="empty-text">No expenses yet — click "Add Expense" above for sub-contractor invoices</div></div></div>
+            <div className="card"><div className="empty-state"><div className="empty-icon">🧾</div><div className="empty-text">No expenses yet — click "Add Expense" above</div></div></div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               {bills.map(bill => (
@@ -449,9 +559,7 @@ export default function ProjectDetailPage() {
             {project.contract_date && <div style={{ color: '#5a5060', fontSize: '0.8rem' }}>Signed {project.contract_date}</div>}
           </div>
           <hr className="divider" />
-          <div style={{ color: '#8a8090', fontSize: '0.85rem', marginBottom: '1rem' }}>
-            Upload the contract document to store it in Google Drive.
-          </div>
+          <div style={{ color: '#8a8090', fontSize: '0.85rem', marginBottom: '1rem' }}>Upload the contract document to store it in Google Drive.</div>
           <div {...contractDropzone.getRootProps()} style={{ border: `2px dashed ${contractDropzone.isDragActive ? '#c8a96e' : 'rgba(200,169,110,0.25)'}`, borderRadius: '10px', padding: '1.5rem', textAlign: 'center', cursor: 'pointer', marginBottom: '1rem' }}>
             <input {...contractDropzone.getInputProps()} />
             {contractFile ? (
