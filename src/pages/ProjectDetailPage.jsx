@@ -844,15 +844,33 @@ setLoading(false)
           )}
 
           {protocoloStep === 'done' && (
-            <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
-              <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>✅</div>
-              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '1.3rem', marginBottom: '0.5rem' }}>Protocolo saved!</div>
-              <div style={{ color: '#8a8090', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Bills saved · Calendar event created · WhatsApp sent to Pati</div>
-              <button className="btn btn-primary" onClick={() => { setProtocoloStep('upload'); setActiveTab('pending') }}>View Pending Bills</button>
-            </div>
-          )}
+  <div>
+    <div className="card" style={{ textAlign: 'center', padding: '2rem', marginBottom: '1rem' }}>
+      <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>✅</div>
+      <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '1.3rem', marginBottom: '0.5rem' }}>Protocolo saved!</div>
+      <div style={{ color: '#8a8090', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Bills created and saved to pending</div>
+      <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+        <button className="btn btn-primary" onClick={() => { setProtocoloStep('upload'); setActiveTab('pending') }}>View Pending Bills</button>
+        {whatsAppMessage && (
+          <button className="btn btn-ghost" onClick={() => setShowWhatsApp(true)}>💬 View Message for Pati</button>
+        )}
+      </div>
+    </div>
+    {whatsAppMessage && showWhatsApp && (
+      <div className="card" style={{ border: '1px solid rgba(76,175,136,0.3)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <div className="card-title" style={{ marginBottom: 0 }}>💬 Message for Pati</div>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button className="btn btn-primary" style={{ fontSize: '0.78rem' }} onClick={() => { navigator.clipboard.writeText(whatsAppMessage); toast.success('Copied!') }}>📋 Copy</button>
+            <button className="btn btn-ghost" style={{ fontSize: '0.78rem' }} onClick={() => window.open(`https://wa.me/5511984055050?text=${encodeURIComponent(whatsAppMessage)}`, '_blank')}>📱 Open WhatsApp</button>
+            <button onClick={() => setShowWhatsApp(false)} style={{ background: 'none', border: 'none', color: '#5a5060', cursor: 'pointer' }}>✕</button>
+          </div>
         </div>
-      )}
+        <pre style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#c8c0b8', whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', padding: '1rem', borderRadius: '8px', lineHeight: 1.6 }}>{whatsAppMessage}</pre>
+      </div>
+    )}
+  </div>
+)}
 
       {/* PENDING BILLS TAB */}
       {activeTab === 'pending' && (
