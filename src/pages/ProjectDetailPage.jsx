@@ -82,6 +82,7 @@ export default function ProjectDetailPage() {
   const [savingProtocolo, setSavingProtocolo] = useState(false)
   const [whatsAppMessage, setWhatsAppMessage] = useState(null)
 const [showWhatsApp, setShowWhatsApp] = useState(false)
+  const [allProjects, setAllProjects] = useState([])
 
   const [paymentForm, setPaymentForm] = useState({
     amount: '', payment_date: format(new Date(), 'yyyy-MM-dd'),
@@ -95,18 +96,20 @@ const [showWhatsApp, setShowWhatsApp] = useState(false)
   useEffect(() => { loadData() }, [id])
 
   async function loadData() {
-    const [{ data: p }, { data: b }, { data: bli }, { data: py }, { data: pr }] = await Promise.all([
-      supabase.from('projects').select('*').eq('id', id).single(),
-      supabase.from('bills').select('*').eq('project_id', id).order('issue_date', { ascending: false }),
-      supabase.from('bill_line_items').select('*'),
-      supabase.from('payments').select('*, paid_by:profiles(id, full_name)').eq('project_id', id).order('payment_date', { ascending: false }),
-      supabase.from('profiles').select('*')
-    ])
-    setProject(p)
-    setBills((b || []).map(bill => ({ ...bill, bill_line_items: (bli || []).filter(i => i.bill_id === bill.id) })))
-    setPayments(py || [])
-    setProfiles(pr || [])
-    setLoading(false)
+  const [{ data: p }, { data: b }, { data: bli }, { data: py }, { data: pr }, { data: ap }] = await Promise.all([
+  supabase.from('projects').select('*').eq('id', id).single(),
+  supabase.from('bills').select('*').eq('project_id', id).order('issue_date', { ascending: false }),
+  supabase.from('bill_line_items').select('*'),
+  supabase.from('payments').select('*, paid_by:profiles(id, full_name)').eq('project_id', id).order('payment_date', { ascending: false }),
+  supabase.from('profiles').select('*'),
+  supabase.from('projects').select('id, name').order('name')
+])
+setProject(p)
+setBills((b || []).map(bill => ({ ...bill, bill_line_items: (bli || []).filter(i => i.bill_id === bill.id) })))
+setPayments(py || [])
+setProfiles(pr || [])
+setAllProjects(ap || [])
+setLoading(false)
     setPaymentForm(f => ({ ...f, paid_by: user?.id || '' }))
   }
 
