@@ -794,23 +794,35 @@ setLoading(false)
                           <span className={`badge ${item.status === 'PAGO' ? 'badge-green' : 'badge-amber'}`}>{item.status}</span>
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
-                        <div style={{ fontSize: '0.75rem', color: '#5a5060', marginRight: '0.5rem', alignSelf: 'center' }}>Assign to:</div>
-                        {['jorge', 'pati', null].map(person => (
-                          <button key={String(person)} onClick={() => assignItem(idx, person)} style={{
-                            padding: '0.25rem 0.75rem', borderRadius: '6px', fontSize: '0.78rem', cursor: 'pointer',
-                            border: `1px solid ${item.assigned_to === person ? '#c8a96e' : 'rgba(200,169,110,0.2)'}`,
-                            background: item.assigned_to === person ? 'rgba(200,169,110,0.15)' : 'transparent',
-                            color: item.assigned_to === person ? '#c8a96e' : '#8a8090'
-                          }}>
-                            {person === null ? 'Unassigned' : person === 'jorge' ? '👤 Jorge' : '👤 Pati'}
-                          </button>
-                        ))}
-                        <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.3rem', fontSize: '0.72rem', color: '#5a5060' }}>
-                          {item.boleto_file && <span>📄 Boleto</span>}
-                          {item.nf_file && <span>🧾 NF</span>}
-                        </div>
-                      </div>
+                      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+  <div style={{ fontSize: '0.75rem', color: '#5a5060', marginRight: '0.5rem', alignSelf: 'center' }}>Assign to:</div>
+  {['jorge', 'pati', null].map(person => (
+    <button key={String(person)} onClick={() => assignItem(idx, person)} style={{
+      padding: '0.25rem 0.75rem', borderRadius: '6px', fontSize: '0.78rem', cursor: 'pointer',
+      border: `1px solid ${item.assigned_to === person ? '#c8a96e' : 'rgba(200,169,110,0.2)'}`,
+      background: item.assigned_to === person ? 'rgba(200,169,110,0.15)' : 'transparent',
+      color: item.assigned_to === person ? '#c8a96e' : '#8a8090'
+    }}>
+      {person === null ? 'Unassigned' : person === 'jorge' ? '👤 Jorge' : '👤 Pati'}
+    </button>
+  ))}
+  {item.status === 'PAGO' && (
+    <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+      <span style={{ fontSize: '0.72rem', color: '#5a5060' }}>Project:</span>
+      <select
+        value={item.project_id_override || id}
+        onChange={e => setProtocoloItems(prev => prev.map((it, i) => i === idx ? { ...it, project_id_override: e.target.value } : it))}
+        style={{ background: '#13131f', border: '1px solid rgba(200,169,110,0.2)', borderRadius: '6px', color: '#c8a96e', fontSize: '0.72rem', padding: '0.2rem 0.4rem' }}
+      >
+        {allProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
+    </div>
+  )}
+  <div style={{ display: 'flex', gap: '0.3rem', fontSize: '0.72rem', color: '#5a5060' }}>
+    {item.boleto_file && <span>📄 Boleto</span>}
+    {item.nf_file && <span>🧾 NF</span>}
+  </div>
+</div>
                     </div>
                   ))}
                 </div>
