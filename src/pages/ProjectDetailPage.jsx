@@ -80,6 +80,8 @@ export default function ProjectDetailPage() {
   const [protocoloStep, setProtocoloStep] = useState('upload') // upload | review | done
   const [processingProtocolo, setProcessingProtocolo] = useState(false)
   const [savingProtocolo, setSavingProtocolo] = useState(false)
+  const [whatsAppMessage, setWhatsAppMessage] = useState(null)
+const [showWhatsApp, setShowWhatsApp] = useState(false)
 
   const [paymentForm, setPaymentForm] = useState({
     amount: '', payment_date: format(new Date(), 'yyyy-MM-dd'),
@@ -216,75 +218,95 @@ export default function ProjectDetailPage() {
   }
 
   async function saveProtocolo() {
-    setSavingProtocolo(true)
-    const protocolName = `Protocolo ${protocoloItems[0]?.protocol_number || '?'}`
+  setSavingProtocolo(true)
+  const protocolName = `Protocolo ${protocoloItems[0]?.protocol_number || '?'}`
 
-    try {
-      // 1. Save each item as a bill in supabase
-      for (const item of protocoloItems) {
-        let boleto_drive_url = null
-        let nf_drive_url = null
+  try {
+    // Load all existing payments for matching
+    const { data: allPayments } = await supabase
+      .from('payments')
+      .select('*')
 
-        // Upload files to Drive if available
-        if (item.boleto_file && project.drive_folder_id) {
-          try {
-            await requestDriveAccess()
-            const uploaded = await uploadBillFile(item.boleto_file, project.drive_folder_id, `Boleto-${item.supplier}-${item.due_date}`)
-            boleto_drive_url = uploaded.webViewLink
-          } catch (e) { console.warn('Drive upload failed', e) }
-        }
-        if (item.nf_file && project.drive_folder_id) {
-          try {
-            await requestDriveAccess()
-            const uploaded = await uploadBillFile(item.nf_file, project.drive_folder_id, `NF-${item.supplier}-${item.due_date}`)
-            nf_drive_url = uploaded.webViewLink
-          } catch (e) { console.warn('NF Drive upload failed', e) }
-        }
-
+    for (const item of protocoloItems) {
+      // For PAGO items: check if already in system
+      if (item.status === 'PAGO') {
+        const alreadyLogged = allPayments?.some(p =>
+          Math.abs(p.amount - item.amount) < 1 &&
+          p.notes?.toLowerCase().includes(item.supplier.toLowerCase().substring(0, 5))
+        )
+        if (alreadyLogged) continue // skip — already in system
+        // Not found — save as paid bill with warning flag
         await supabase.from('bills').insert({
-          project_id: id,
+          project_id: item.project_id_override || id,
           contractor_name: item.supplier,
           bill_number: item.invoice_number,
           issue_date: item.due_date,
           due_date: item.due_date,
           total_amount: item.amount,
-          status: item.status === 'PAGO' ? 'paid' : 'pending',
+          status: 'paid',
           notes: [
             item.category,
             item.payment_method,
-            item.linha_digitavel ? `Linha digitável: ${item.linha_digitavel}` : null,
-            item.assigned_to ? `Responsável: ${item.assigned_to === 'pati' ? 'Patricia' : 'Jorge'}` : null,
-            protocolName
-          ].filter(Boolean).join(' · '),
-          drive_file_url: boleto_drive_url || nf_drive_url
+            `Responsável: ${item.assigned_to === 'pati' ? 'Patricia' : item.assigned_to === 'jorge' ? 'Jorge' : 'A definir'}`,
+            protocolName,
+            '⚠️ PAGO no protocolo mas não encontrado no sistema'
+          ].filter(Boolean).join(' · ')
         })
+        continue
       }
 
-      // 2. Create Google Calendar event
-      try {
-        await createCalendarEvent(protocoloItems, protocolName)
-        toast.success('Calendar event created!')
-      } catch (e) {
-        toast.error('Calendar event failed: ' + e.message)
+      // For A VENCER items: save as pending bill as before
+      let boleto_drive_url = null
+      let nf_drive_url = null
+
+      if (item.boleto_file && project.drive_folder_id) {
+        try {
+          await requestDriveAccess()
+          const uploaded = await uploadBillFile(item.boleto_file, project.drive_folder_id, `Boleto-${item.supplier}-${item.due_date}`)
+          boleto_drive_url = uploaded.webViewLink
+        } catch (e) { console.warn('Drive upload failed', e) }
+      }
+      if (item.nf_file && project.drive_folder_id) {
+        try {
+          await requestDriveAccess()
+          const uploaded = await uploadBillFile(item.nf_file, project.drive_folder_id, `NF-${item.supplier}-${item.due_date}`)
+          nf_drive_url = uploaded.webViewLink
+        } catch (e) { console.warn('NF Drive upload failed', e) }
       }
 
-      // 3. Open WhatsApp if any items assigned to Pati
-      const msg = generateWhatsAppMessage(protocoloItems, protocolName)
-      if (msg) {
-        toast('Opening WhatsApp for Pati…', { icon: '💬' })
-        setTimeout(() => openWhatsApp(msg), 1000)
-      }
-
-      toast.success(`${protocolName} saved!`)
-      setProtocoloStep('done')
-      setProtocoloFiles([])
-      loadData()
-    } catch (err) {
-      toast.error('Failed to save: ' + err.message)
-    } finally {
-      setSavingProtocolo(false)
+      await supabase.from('bills').insert({
+        project_id: item.project_id_override || id,
+        contractor_name: item.supplier,
+        bill_number: item.invoice_number,
+        issue_date: item.due_date,
+        due_date: item.due_date,
+        total_amount: item.amount,
+        status: 'pending',
+        notes: [
+          item.category,
+          item.payment_method,
+          item.linha_digitavel ? `Linha digitável: ${item.linha_digitavel}` : null,
+          item.assigned_to ? `Responsável: ${item.assigned_to === 'pati' ? 'Patricia' : 'Jorge'}` : null,
+          protocolName
+        ].filter(Boolean).join(' · '),
+        drive_file_url: boleto_drive_url || nf_drive_url
+      })
     }
+
+    // Generate WhatsApp message and store it
+    const msg = generateWhatsAppMessage(protocoloItems, protocolName)
+    if (msg) setWhatsAppMessage(msg)
+
+    toast.success(`${protocolName} saved!`)
+    setProtocoloStep('done')
+    setProtocoloFiles([])
+    loadData()
+  } catch (err) {
+    toast.error('Failed to save: ' + err.message)
+  } finally {
+    setSavingProtocolo(false)
   }
+}
 
   async function createCalendarEvent(items, protocolName) {
     // Find earliest due date
