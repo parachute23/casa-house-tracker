@@ -109,8 +109,8 @@ parsedAmount = parseFloat(cleaned) || 0
 
 export function matchFilesToItems(items, files) {
   const boletos = files.filter(f => f.name.toUpperCase().includes('BOLETO') && !f.name.toUpperCase().includes('NF'))
-  const nfs = files.filter(f => 
-    f.name.toUpperCase().includes('NF') || 
+  const nfs = files.filter(f =>
+    f.name.toUpperCase().includes('NF') ||
     f.name.toUpperCase().includes('NOTA') ||
     f.name.toUpperCase().includes('RECIBO') ||
     f.name.toUpperCase().includes('REEMBOLSO') ||
@@ -124,25 +124,21 @@ export function matchFilesToItems(items, files) {
     const amountStr2 = String(Math.round(item.amount)).padStart(4, '0')
 
     const matchFile = (fileList) => {
-  // Try amount match first (more specific)
-  const amountMatch = fileList.find(f => 
-    f.name.includes(amountStr) || f.name.includes(amountStr2)
-  )
-  if (amountMatch) return amountMatch
-  // Fall back to supplier name
-  return fileList.find(f => f.name.toUpperCase().includes(supplierKey))
-})
+      const amountMatch = fileList.find(f =>
+        f.name.includes(amountStr) || f.name.includes(amountStr2)
+      )
+      if (amountMatch) return amountMatch
+      return fileList.find(f => f.name.toUpperCase().includes(supplierKey))
+    }
 
     const boleto = matchFile(boletos)
     const nf = matchFile(nfs) || matchFile(unmatched)
-
     return { ...item, boleto_file: boleto || null, nf_file: nf || null }
   })
 
-  // If any PDF is still unmatched, assign to first item without a payment file
   const allAssigned = updated.flatMap(i => [i.boleto_file, i.nf_file]).filter(Boolean)
   const remainingFiles = files.filter(f => !allAssigned.includes(f))
-  
+
   if (remainingFiles.length > 0) {
     remainingFiles.forEach(file => {
       const itemWithoutFile = updated.find(i => !i.boleto_file && !i.nf_file)
