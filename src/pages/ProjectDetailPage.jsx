@@ -915,13 +915,22 @@ setLoading(false)
                         <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '1.2rem', color: '#c8a96e' }}>{fmt(bill.total_amount)}</span>
                         {bill.drive_file_url && <a href={bill.drive_file_url} target="_blank" rel="noreferrer" style={{ color: '#8a8090', fontSize: '0.75rem' }}>📄 View</a>}
                         <button className="btn btn-ghost" style={{ fontSize: '0.75rem', padding: '0.25rem 0.75rem' }}
-                          onClick={async () => {
-                            await supabase.from('bills').update({ status: 'paid' }).eq('id', bill.id)
-                            toast.success('Marked as paid')
-                            loadData()
-                          }}>
-                          ✅ Mark paid
-                        </button>
+  onClick={async () => {
+    await supabase.from('bills').update({ status: 'paid' }).eq('id', bill.id)
+    toast.success('Marked as paid')
+    loadData()
+  }}>
+  ✅ Mark paid
+</button>
+<button className="btn btn-ghost" style={{ fontSize: '0.75rem', padding: '0.25rem 0.75rem', color: '#e05c6a' }}
+  onClick={async () => {
+    if (!confirm('Delete this bill?')) return
+    await supabase.from('bills').delete().eq('id', bill.id)
+    toast.success('Deleted')
+    loadData()
+  }}>
+  🗑️
+</button>
                       </div>
                     </div>
                   </div>
@@ -951,6 +960,15 @@ setLoading(false)
                       <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '1.2rem', color: '#e8a84c' }}>{fmt(bill.total_amount)}</span>
                       <span className={`badge ${bill.status === 'paid' ? 'badge-green' : bill.status === 'disputed' ? 'badge-red' : 'badge-amber'}`}>{bill.status}</span>
                       {bill.drive_file_url && <a href={bill.drive_file_url} target="_blank" rel="noreferrer" style={{ color: '#c8a96e', fontSize: '0.78rem' }}>📁 View</a>}
+                      <button style={{ background: 'none', border: 'none', color: '#e05c6a', cursor: 'pointer', fontSize: '0.78rem' }}
+  onClick={async () => {
+    if (!confirm('Delete this expense?')) return
+    await supabase.from('bills').delete().eq('id', bill.id)
+    toast.success('Deleted')
+    loadData()
+  }}>
+  🗑️
+</button>
                     </div>
                   </div>
                 </div>
