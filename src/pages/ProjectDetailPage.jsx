@@ -806,18 +806,16 @@ setLoading(false)
       {person === null ? 'Unassigned' : person === 'jorge' ? '👤 Jorge' : '👤 Pati'}
     </button>
   ))}
-  {item.status === 'PAGO' && (
-    <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-      <span style={{ fontSize: '0.72rem', color: '#5a5060' }}>Project:</span>
-      <select
-        value={item.project_id_override || id}
-        onChange={e => setProtocoloItems(prev => prev.map((it, i) => i === idx ? { ...it, project_id_override: e.target.value } : it))}
-        style={{ background: '#13131f', border: '1px solid rgba(200,169,110,0.2)', borderRadius: '6px', color: '#c8a96e', fontSize: '0.72rem', padding: '0.2rem 0.4rem' }}
-      >
-        {allProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-      </select>
-    </div>
-  )}
+ <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+    <span style={{ fontSize: '0.72rem', color: '#5a5060' }}>Project:</span>
+    <select
+      value={item.project_id_override || id}
+      onChange={e => setProtocoloItems(prev => prev.map((it, i) => i === idx ? { ...it, project_id_override: e.target.value } : it))}
+      style={{ background: '#13131f', border: '1px solid rgba(200,169,110,0.2)', borderRadius: '6px', color: '#c8a96e', fontSize: '0.72rem', padding: '0.2rem 0.4rem' }}
+    >
+      {allProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+    </select>
+  </div>
   <div style={{ display: 'flex', gap: '0.3rem', fontSize: '0.72rem', color: '#5a5060' }}>
     {item.boleto_file && <span>📄 Boleto</span>}
     {item.nf_file && <span>🧾 NF</span>}
