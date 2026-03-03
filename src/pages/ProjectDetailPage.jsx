@@ -190,6 +190,13 @@ setLoading(false)
 
       // Extract linha digitável from boletos using AI
       const itemsWithFiles = items.filter(i => i.boleto_file || i.nf_file)
+      console.log('[all items]', items.map(i => ({ 
+  supplier: i.supplier, 
+  amount: i.amount,
+  boleto: i.boleto_file?.name, 
+  nf: i.nf_file?.name 
+})))
+const itemsWithFiles = items.filter(i => i.boleto_file || i.nf_file)
 if (itemsWithFiles.length > 0) {
   toast(`Reading ${itemsWithFiles.length} payment document(s) with AI…`, { icon: '🤖' })
   await Promise.all(
