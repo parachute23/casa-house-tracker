@@ -121,14 +121,18 @@ export function matchFilesToItems(items, files) {
   const updated = items.map(item => {
     const supplierKey = item.supplier.toUpperCase().replace(/\s+/g, '').substring(0, 6)
     const amountStr = String(item.amount).replace('.', '_').replace(',', '_')
-    const amountStr2 = String(Math.round(item.amount)).padStart(4, '0')
+const amountStrComma = String(item.amount).replace('.', ',')
+const amountStr2 = String(Math.round(item.amount)).padStart(4, '0')
 
-    const matchFile = (fileList) => {
-      const amountMatch = fileList.find(f =>
-        f.name.includes(amountStr) || f.name.includes(amountStr2)
-      )
-      if (amountMatch) return amountMatch
-      return fileList.find(f => f.name.toUpperCase().includes(supplierKey))
+const matchFile = (fileList) => {
+  const amountMatch = fileList.find(f =>
+    f.name.includes(amountStr) ||
+    f.name.includes(amountStr2) ||
+    f.name.includes(amountStrComma)
+  )
+  if (amountMatch) return amountMatch
+  return fileList.find(f => f.name.toUpperCase().includes(supplierKey))
+}
     }
 
     const boleto = matchFile(boletos)
