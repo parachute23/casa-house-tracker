@@ -118,7 +118,7 @@ export async function extractBoletoDetails(file) {
       messages: [{
         role: 'user',
         content: [
-          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: base64 } },
+          { type: file.type === 'application/pdf' ? 'document' : 'image', source: { type: 'base64', media_type: file.type, data: base64 } },
           { type: 'text', text: `This is a Brazilian boleto bancário. Extract the payment details and return ONLY valid JSON, no markdown:
 {
   "linha_digitavel": "the long numeric code used to pay (linha digitável), format like: 23790.12004 91360.370240 43010.010304 4 13630000249000",
@@ -140,7 +140,11 @@ export async function extractBoletoDetails(file) {
 
 export async function extractPaymentDetails(file) {
   const base64 = await fileToBase64(file)
-  const mediaType = file.type === 'application/pdf' ? 'application/pdf' : file.type
+  const isPdf = file.type === 'application/pdf'
+  const contentBlock = isPdf
+    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
+    : { type: 'image', source: { type: 'base64', media_type: file.type, data: base64 } }
+
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -155,7 +159,7 @@ export async function extractPaymentDetails(file) {
       messages: [{
         role: 'user',
         content: [
-          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: base64 } },
+          contentBlock,
           { type: 'text', text: `This is a Brazilian payment document (may be a boleto, nota fiscal, or recibo). 
 Extract any payment details and return ONLY valid JSON, no markdown:
 {
