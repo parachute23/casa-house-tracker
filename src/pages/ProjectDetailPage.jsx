@@ -195,6 +195,7 @@ if (itemsWithFiles.length > 0) {
   await Promise.all(
     itemsWithFiles.map(async (item) => {
       const fileToRead = item.boleto_file || item.nf_file
+console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: ${item.boleto_file?.name}, nf: ${item.nf_file?.name}`)
       try {
         const details = await extractPaymentDetails(fileToRead)
         const idx = items.indexOf(item)
