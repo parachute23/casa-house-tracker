@@ -124,15 +124,18 @@ export function matchFilesToItems(items, files) {
     const amountStrComma = String(item.amount).replace('.', ',')
     const amountStr2 = String(Math.round(item.amount)).padStart(4, '0')
 
-    const matchFile = (fileList) => {
-      const amountMatch = fileList.find(f =>
-        f.name.includes(amountStr) ||
-        f.name.includes(amountStr2) ||
-        f.name.includes(amountStrComma)
-      )
-      if (amountMatch) return amountMatch
-      return fileList.find(f => f.name.toUpperCase().includes(supplierKey))
-    }
+ const matchFile = (fileList) => {
+  const isMeasurementDoc = f => ['MEDICAO', 'MEDIÇÃO', 'BOLETIM'].some(k => f.name.toUpperCase().includes(k))
+  const amountMatch = fileList.find(f =>
+    !isMeasurementDoc(f) && (
+      f.name.includes(amountStr) ||
+      f.name.includes(amountStr2) ||
+      f.name.includes(amountStrComma)
+    )
+  )
+  if (amountMatch) return amountMatch
+  return fileList.find(f => !isMeasurementDoc(f) && f.name.toUpperCase().includes(supplierKey))
+}
 
     const boleto = matchFile(boletos)
     const nf = matchFile(nfs) || matchFile(unmatched)
