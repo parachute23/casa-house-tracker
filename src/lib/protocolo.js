@@ -108,36 +108,46 @@ parsedAmount = parseFloat(cleaned) || 0
 }
 
 export function matchFilesToItems(items, files) {
-  // Separate boletos and NFs
   const boletos = files.filter(f => f.name.toUpperCase().includes('BOLETO') && !f.name.toUpperCase().includes('NF'))
-  const nfs = files.filter(f => f.name.toUpperCase().includes('NF') || f.name.toUpperCase().includes('NOTA'))
+  const nfs = files.filter(f => 
+    f.name.toUpperCase().includes('NF') || 
+    f.name.toUpperCase().includes('NOTA') ||
+    f.name.toUpperCase().includes('RECIBO') ||
+    f.name.toUpperCase().includes('REEMBOLSO') ||
+    f.name.toUpperCase().includes('ND')
+  )
+  const unmatched = files.filter(f => !boletos.includes(f) && !nfs.includes(f))
 
   const updated = items.map(item => {
-    // Match boleto by amount in filename or by order
-    const boleto = boletos.find(f => {
-      const amountStr = String(item.amount).replace('.', '_').replace(',', '_')
-  const amountStr2 = String(Math.round(item.amount)).padStart(4, '0')
-      const supplierKey = item.supplier.toUpperCase().replace(/\s+/g, '').substring(0, 6)
-      return f.name.toUpperCase().includes(supplierKey) ||
+    const supplierKey = item.supplier.toUpperCase().replace(/\s+/g, '').substring(0, 6)
+    const amountStr = String(item.amount).replace('.', '_').replace(',', '_')
+    const amountStr2 = String(Math.round(item.amount)).padStart(4, '0')
+
+    const matchFile = (fileList) => fileList.find(f => {
+      const name = f.name.toUpperCase()
+      return name.includes(supplierKey) ||
              f.name.includes(amountStr) ||
              f.name.includes(amountStr2)
     })
 
-    const nf = nfs.find(f => {
-      const amountStr = String(item.amount).replace('.', '_').replace(',', '_')
-      const amountStr2 = String(Math.round(item.amount)).padStart(4, '0')
-      const supplierKey = item.supplier.toUpperCase().replace(/\s+/g, '').substring(0, 6)
-      return f.name.toUpperCase().includes(supplierKey) ||
-             f.name.includes(amountStr) ||
-             f.name.includes(amountStr2)
-    })
+    const boleto = matchFile(boletos)
+    const nf = matchFile(nfs) || matchFile(unmatched)
 
-    return {
-      ...item,
-      boleto_file: boleto || null,
-      nf_file: nf || null
-    }
+    return { ...item, boleto_file: boleto || null, nf_file: nf || null }
   })
+
+  // If any PDF is still unmatched, assign to first item without a payment file
+  const allAssigned = updated.flatMap(i => [i.boleto_file, i.nf_file]).filter(Boolean)
+  const remainingFiles = files.filter(f => !allAssigned.includes(f))
+  
+  if (remainingFiles.length > 0) {
+    remainingFiles.forEach(file => {
+      const itemWithoutFile = updated.find(i => !i.boleto_file && !i.nf_file)
+      if (itemWithoutFile) {
+        itemWithoutFile.nf_file = file
+      }
+    })
+  }
 
   return updated
 }
