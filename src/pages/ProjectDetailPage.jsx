@@ -196,7 +196,7 @@ setLoading(false)
   boleto: i.boleto_file?.name, 
   nf: i.nf_file?.name 
 })))
-const itemsWithFiles = items.filter(i => i.boleto_file || i.nf_file)
+
 if (itemsWithFiles.length > 0) {
   toast(`Reading ${itemsWithFiles.length} payment document(s) with AI…`, { icon: '🤖' })
   await Promise.all(
