@@ -142,12 +142,14 @@ export function matchFilesToItems(items, files) {
   const allAssigned = updated.flatMap(i => [i.boleto_file, i.nf_file]).filter(Boolean)
   const remainingFiles = files.filter(f => !allAssigned.includes(f))
 
-  if (remainingFiles.length > 0) {
-    remainingFiles.forEach(file => {
+if (remainingFiles.length > 0) {
+    const sorted = [...remainingFiles].sort((a, b) => {
+      const isPayment = f => ['NF','RECIBO','REEMBOLSO','ND','NOTA','BOLETO'].some(k => f.name.toUpperCase().includes(k))
+      return isPayment(b) - isPayment(a)
+    })
+    sorted.forEach(file => {
       const itemWithoutFile = updated.find(i => !i.boleto_file && !i.nf_file)
-      if (itemWithoutFile) {
-        itemWithoutFile.nf_file = file
-      }
+      if (itemWithoutFile) itemWithoutFile.nf_file = file
     })
   }
 
