@@ -198,6 +198,7 @@ if (itemsWithFiles.length > 0) {
 console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: ${item.boleto_file?.name}, nf: ${item.nf_file?.name}`)
       try {
         const details = await extractPaymentDetails(fileToRead)
+        console.log(`[details] ${item.supplier}`, JSON.stringify(details))
         const idx = items.indexOf(item)
         if (details.linha_digitavel) {
           items[idx].linha_digitavel = details.linha_digitavel
