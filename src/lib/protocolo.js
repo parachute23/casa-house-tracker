@@ -123,12 +123,15 @@ export function matchFilesToItems(items, files) {
     const amountStr = String(item.amount).replace('.', '_').replace(',', '_')
     const amountStr2 = String(Math.round(item.amount)).padStart(4, '0')
 
-    const matchFile = (fileList) => fileList.find(f => {
-      const name = f.name.toUpperCase()
-      return name.includes(supplierKey) ||
-             f.name.includes(amountStr) ||
-             f.name.includes(amountStr2)
-    })
+    const matchFile = (fileList) => {
+  // Try amount match first (more specific)
+  const amountMatch = fileList.find(f => 
+    f.name.includes(amountStr) || f.name.includes(amountStr2)
+  )
+  if (amountMatch) return amountMatch
+  // Fall back to supplier name
+  return fileList.find(f => f.name.toUpperCase().includes(supplierKey))
+})
 
     const boleto = matchFile(boletos)
     const nf = matchFile(nfs) || matchFile(unmatched)
