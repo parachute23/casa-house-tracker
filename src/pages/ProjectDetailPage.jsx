@@ -871,6 +871,8 @@ setLoading(false)
     )}
   </div>
 )}
+        </div>
+      )}
 
       {/* PENDING BILLS TAB */}
       {activeTab === 'pending' && (
