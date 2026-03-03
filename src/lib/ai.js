@@ -138,6 +138,51 @@ export async function extractBoletoDetails(file) {
   return JSON.parse(text.replace(/```json|```/g, '').trim())
 }
 
+export async function extractPaymentDetails(file) {
+  const base64 = await fileToBase64(file)
+  const mediaType = file.type === 'application/pdf' ? 'application/pdf' : file.type
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1000,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: base64 } },
+          { type: 'text', text: `This is a Brazilian payment document (may be a boleto, nota fiscal, or recibo). 
+Extract any payment details and return ONLY valid JSON, no markdown:
+{
+  "linha_digitavel": "numeric boleto code if present, otherwise null",
+  "pix_key": "PIX key if present (CPF, CNPJ, email, phone, or random key), otherwise null",
+  "bank_transfer": {
+    "bank": "bank name or null",
+    "agency": "agency number or null", 
+    "account": "account number or null",
+    "account_type": "corrente or poupança or null",
+    "cnpj_cpf": "CNPJ or CPF of recipient or null"
+  },
+  "beneficiario": "name of who receives the payment or null",
+  "valor": number or null,
+  "vencimento": "YYYY-MM-DD or null"
+}
+If a field is not found in the document, return null for that field.` }
+        ]
+      }]
+    })
+  })
+  const data = await response.json()
+  if (data.error) throw new Error(data.error.message)
+  const text = data.content[0].text
+  return JSON.parse(text.replace(/```json|```/g, '').trim())
+}
+
 export async function generateCostEstimate(project, lineItems, bills, payments) {
   const totalBudget = lineItems.reduce((s, i) => s + i.budgeted_amount, 0) || project?.contract_amount || 0
   const totalBilled = bills.reduce((s, b) => s + b.total_amount, 0)
