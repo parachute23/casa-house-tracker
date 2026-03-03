@@ -189,20 +189,29 @@ setLoading(false)
       items = matchFilesToItems(items, pdfFiles)
 
       // Extract linha digitável from boletos using AI
-      const itemsWithBoleto = items.filter(i => i.boleto_file)
-      if (itemsWithBoleto.length > 0) {
-        toast(`Reading ${itemsWithBoleto.length} boleto(s) with AI…`, { icon: '🤖' })
-        await Promise.all(
-          itemsWithBoleto.map(async (item, idx) => {
-            try {
-              const details = await extractBoletoDetails(item.boleto_file)
-              items[items.indexOf(item)].linha_digitavel = details.linha_digitavel
-            } catch (err) {
-              console.warn('Could not extract boleto details:', err)
-            }
-          })
-        )
+      const itemsWithFiles = items.filter(i => i.boleto_file || i.nf_file)
+if (itemsWithFiles.length > 0) {
+  toast(`Reading ${itemsWithFiles.length} payment document(s) with AI…`, { icon: '🤖' })
+  await Promise.all(
+    itemsWithFiles.map(async (item) => {
+      const fileToRead = item.boleto_file || item.nf_file
+      try {
+        const details = await extractPaymentDetails(fileToRead)
+        const idx = items.indexOf(item)
+        if (details.linha_digitavel) {
+          items[idx].linha_digitavel = details.linha_digitavel
+        } else if (details.pix_key) {
+          items[idx].linha_digitavel = `PIX: ${details.pix_key}`
+        } else if (details.bank_transfer?.account) {
+          const bt = details.bank_transfer
+          items[idx].linha_digitavel = `TED: ${bt.bank || ''} Ag ${bt.agency || ''} Cc ${bt.account || ''} ${bt.cnpj_cpf || ''}`.trim()
+        }
+      } catch (err) {
+        console.warn('Could not extract payment details:', err)
       }
+    })
+  )
+}
 
       setProtocoloItems(items)
       setProtocoloStep('review')
@@ -783,11 +792,15 @@ setLoading(false)
                             {item.category} · {item.payment_method} · Due {fmtDate(item.due_date)}
                             {item.invoice_number && ` · NF ${item.invoice_number}`}
                           </div>
-                          {item.linha_digitavel && (
-                            <div style={{ fontSize: '0.72rem', color: '#8a8090', marginTop: '0.3rem', fontFamily: 'monospace', background: 'rgba(0,0,0,0.2)', padding: '0.25rem 0.5rem', borderRadius: '4px' }}>
-                              {item.linha_digitavel}
-                            </div>
-                          )}
+                          {item.linha_digitavel ? (
+  <div style={{ fontSize: '0.72rem', color: '#8a8090', marginTop: '0.3rem', fontFamily: 'monospace', background: 'rgba(0,0,0,0.2)', padding: '0.25rem 0.5rem', borderRadius: '4px' }}>
+    {item.linha_digitavel}
+  </div>
+) : item.status !== 'PAGO' && (
+  <div style={{ fontSize: '0.72rem', color: '#e8a84c', marginTop: '0.3rem' }}>
+    ⚠️ No payment details found — upload the boleto or NF with payment info
+  </div>
+)}
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.4rem' }}>
                           <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '1.1rem', color: '#c8a96e' }}>{fmt(item.amount)}</span>
