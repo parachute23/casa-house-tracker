@@ -650,7 +650,7 @@ console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: $
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: '0.25rem', marginBottom: '1.5rem', borderBottom: '1px solid rgba(200,169,110,0.1)', flexWrap: 'wrap' }}>
-        {['payments', 'protocolo', 'pending', 'expenses', 'contract', 'estimate'].map(tab => (
+        {['payments', 'protocolo', 'pending', 'contract', 'estimate'].map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)} style={{
             background: 'none', border: 'none', cursor: 'pointer', padding: '0.5rem 1rem',
             fontSize: '0.82rem', fontFamily: "'DM Sans', sans-serif",
@@ -660,9 +660,11 @@ console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: $
             fontWeight: activeTab === tab ? 500 : 400, letterSpacing: '0.04em'
           }}>
             {tab === 'estimate' ? '🤖 AI Estimate' :
-             tab === 'protocolo' ? '📋 Protocolo' :
-             tab === 'pending' ? `⏳ Pending${pendingBills.length > 0 ? ` (${pendingBills.length})` : ''}` :
-             tab.charAt(0).toUpperCase() + tab.slice(1)}
+ tab === 'protocolo' ? '📋 Protocolo' :
+ tab === 'pending' ? `⏳ Pending${pendingBills.length > 0 ? ` (${pendingBills.length})` : ''}` :
+ tab === 'payments' ? '💳 Payments' :
+ tab === 'contract' ? '📄 Contract' :
+ tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
       </div>
@@ -1065,42 +1067,7 @@ console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: $
         </div>
       )}
 
-      {/* EXPENSES TAB */}
-      {activeTab === 'expenses' && (
-        <div>
-          {bills.filter(b => b.status !== 'pending').length === 0 ? (
-            <div className="card"><div className="empty-state"><div className="empty-icon">🧾</div><div className="empty-text">No expenses yet</div></div></div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {bills.filter(b => b.status !== 'pending').map(bill => (
-                <div key={bill.id} className="card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
-                      <div style={{ fontWeight: 500, marginBottom: '0.25rem' }}>{bill.contractor_name}{bill.bill_number ? ` — #${bill.bill_number}` : ''}</div>
-                      <div style={{ fontSize: '0.78rem', color: '#8a8090' }}>{bill.issue_date}</div>
-                      {bill.notes && <div style={{ fontSize: '0.78rem', color: '#5a5060', marginTop: '0.2rem' }}>{bill.notes}</div>}
-                    </div>
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                      <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '1.2rem', color: '#e8a84c' }}>{fmt(bill.total_amount)}</span>
-                      <span className={`badge ${bill.status === 'paid' ? 'badge-green' : bill.status === 'disputed' ? 'badge-red' : 'badge-amber'}`}>{bill.status}</span>
-                      {bill.drive_file_url && <a href={bill.drive_file_url} target="_blank" rel="noreferrer" style={{ color: '#c8a96e', fontSize: '0.78rem' }}>📁 View</a>}
-                      <button style={{ background: 'none', border: 'none', color: '#e05c6a', cursor: 'pointer', fontSize: '0.78rem' }}
-  onClick={async () => {
-    if (!confirm('Delete this expense?')) return
-    await supabase.from('bills').delete().eq('id', bill.id)
-    toast.success('Deleted')
-    loadData()
-  }}>
-  🗑️
-</button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+  
 
       {/* CONTRACT TAB */}
       {activeTab === 'contract' && (
