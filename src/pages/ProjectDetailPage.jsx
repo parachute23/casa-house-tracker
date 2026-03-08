@@ -83,11 +83,12 @@ export default function ProjectDetailPage() {
   const [whatsAppMessage, setWhatsAppMessage] = useState(null)
 const [showWhatsApp, setShowWhatsApp] = useState(false)
   const [allProjects, setAllProjects] = useState([])
+  const [contractorBudgets, setContractorBudgets] = useState([])
 
-  const [paymentForm, setPaymentForm] = useState({
-    amount: '', payment_date: format(new Date(), 'yyyy-MM-dd'),
-    notes: '', paid_by: '', payment_method: 'PIX'
-  })
+ const [paymentForm, setPaymentForm] = useState({
+  amount: '', payment_date: format(new Date(), 'yyyy-MM-dd'),
+  notes: '', paid_by: '', payment_method: 'PIX', bill_id: ''
+})
   const [expenseForm, setExpenseForm] = useState({
     bill_number: '', contractor_name: '', issue_date: '',
     total_amount: '', notes: '', status: 'pending'
@@ -96,19 +97,21 @@ const [showWhatsApp, setShowWhatsApp] = useState(false)
   useEffect(() => { loadData() }, [id])
 
   async function loadData() {
-  const [{ data: p }, { data: b }, { data: bli }, { data: py }, { data: pr }, { data: ap }] = await Promise.all([
+ const [{ data: p }, { data: b }, { data: bli }, { data: py }, { data: pr }, { data: ap }, { data: cb }] = await Promise.all([
   supabase.from('projects').select('*').eq('id', id).single(),
   supabase.from('bills').select('*').eq('project_id', id).order('issue_date', { ascending: false }),
   supabase.from('bill_line_items').select('*'),
   supabase.from('payments').select('*, paid_by:profiles(id, full_name)').eq('project_id', id).order('payment_date', { ascending: false }),
   supabase.from('profiles').select('*'),
-  supabase.from('projects').select('id, name').order('name')
+  supabase.from('projects').select('id, name').order('name'),
+  supabase.from('contractor_budgets').select('*').eq('project_id', id)
 ])
 setProject(p)
 setBills((b || []).map(bill => ({ ...bill, bill_line_items: (bli || []).filter(i => i.bill_id === bill.id) })))
 setPayments(py || [])
 setProfiles(pr || [])
 setAllProjects(ap || [])
+setContractorBudgets(cb || [])
 setLoading(false)
     setPaymentForm(f => ({ ...f, paid_by: user?.id || '' }))
   }
@@ -295,6 +298,21 @@ console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: $
         } catch (e) { console.warn('NF Drive upload failed', e) }
       }
 
+    // Budget warning for protocolo items
+      const itemBudget = contractorBudgets.find(cb =>
+        cb.contractor_name.toLowerCase() === item.supplier?.toLowerCase()
+      )
+      if (itemBudget) {
+        const alreadyBilled = bills
+          .filter(b => b.contractor_name?.toLowerCase() === item.supplier?.toLowerCase())
+          .reduce((s, b) => s + b.total_amount, 0)
+        const newTotal = alreadyBilled + item.amount
+        if (newTotal > itemBudget.budget_amount) {
+          const over = newTotal - itemBudget.budget_amount
+          toast(`⚠️ ${item.supplier} is R$${over.toLocaleString('pt-BR', {minimumFractionDigits:2})} over budget of ${fmt(itemBudget.budget_amount)}`, { icon: '🚨', duration: 6000 })
+        }
+      }
+
       await supabase.from('bills').insert({
         project_id: item.project_id_override || id,
         contractor_name: item.supplier,
@@ -397,35 +415,50 @@ console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: $
   }
 
   async function savePayment(e) {
-    e.preventDefault()
-    let drive_file_id = null, drive_file_url = null
-    if (paymentFile && project.drive_folder_id) {
-      try {
-        await requestDriveAccess()
-        const uploaded = await uploadPaymentFile(paymentFile, project.drive_folder_id, `PIX-${paymentForm.payment_date}-${paymentForm.amount}`)
-        drive_file_id = uploaded.id
-        drive_file_url = uploaded.webViewLink
-      } catch {}
-    }
-    const { error } = await supabase.from('payments').insert({
-      project_id: id,
-      paid_by: paymentForm.paid_by,
-      amount: +paymentForm.amount,
-      payment_date: paymentForm.payment_date,
-      notes: paymentForm.notes,
-      payment_method: paymentForm.payment_method,
-      drive_file_id,
-      drive_file_url
-    })
-    if (error) toast.error(error.message)
-    else {
-      toast.success('Payment recorded')
-      setShowPaymentForm(false)
-      setPaymentFile(null)
-      setPaymentForm({ amount: '', payment_date: format(new Date(), 'yyyy-MM-dd'), notes: '', paid_by: user?.id || '', payment_method: 'PIX' })
-      loadData()
-    }
+  e.preventDefault()
+  let drive_file_id = null, drive_file_url = null
+  if (paymentFile && project.drive_folder_id) {
+    try {
+      await requestDriveAccess()
+      const uploaded = await uploadPaymentFile(paymentFile, project.drive_folder_id, `PIX-${paymentForm.payment_date}-${paymentForm.amount}`)
+      drive_file_id = uploaded.id
+      drive_file_url = uploaded.webViewLink
+    } catch {}
   }
+
+  // Auto-match bill if not manually selected
+  let linkedBillId = paymentForm.bill_id || null
+  if (!linkedBillId) {
+    const matched = pendingBills.find(b =>
+      Math.abs(b.total_amount - +paymentForm.amount) < 1
+    )
+    if (matched) linkedBillId = matched.id
+  }
+
+  const { error } = await supabase.from('payments').insert({
+    project_id: id,
+    paid_by: paymentForm.paid_by,
+    amount: +paymentForm.amount,
+    payment_date: paymentForm.payment_date,
+    notes: paymentForm.notes,
+    payment_method: paymentForm.payment_method,
+    bill_id: linkedBillId,
+    drive_file_id,
+    drive_file_url
+  })
+  if (error) { toast.error(error.message); return }
+
+  // Mark linked bill as paid
+  if (linkedBillId) {
+    await supabase.from('bills').update({ status: 'paid' }).eq('id', linkedBillId)
+  }
+
+  toast.success(linkedBillId ? 'Payment recorded & bill marked paid' : 'Payment recorded')
+  setShowPaymentForm(false)
+  setPaymentFile(null)
+  setPaymentForm({ amount: '', payment_date: format(new Date(), 'yyyy-MM-dd'), notes: '', paid_by: user?.id || '', payment_method: 'PIX', bill_id: '' })
+  loadData()
+}
 
   async function processBillWithAI() {
     if (!billFile) return
@@ -450,9 +483,25 @@ console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: $
     }
   }
 
-  async function saveExpense(e) {
-    e.preventDefault()
-    let drive_file_id = null, drive_file_url = null
+ async function saveExpense(e) {
+  e.preventDefault()
+
+  // Budget warning check
+  const budget = contractorBudgets.find(cb =>
+    cb.contractor_name.toLowerCase() === expenseForm.contractor_name?.toLowerCase()
+  )
+  if (budget) {
+    const alreadyBilled = bills
+      .filter(b => b.contractor_name?.toLowerCase() === expenseForm.contractor_name?.toLowerCase())
+      .reduce((s, b) => s + b.total_amount, 0)
+    const newTotal = alreadyBilled + +expenseForm.total_amount
+    if (newTotal > budget.budget_amount) {
+      const over = newTotal - budget.budget_amount
+      if (!confirm(`⚠️ This bill puts ${expenseForm.contractor_name} R$${over.toLocaleString('pt-BR', {minimumFractionDigits:2})} over their budget of ${fmt(budget.budget_amount)}. Save anyway?`)) return
+    }
+  }
+
+  let drive_file_id = null, drive_file_url = null
     if (billFile && project.drive_folder_id) {
       try {
         await requestDriveAccess()
@@ -476,10 +525,17 @@ console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: $
     loadData()
   }
 
-  async function deletePayment(paymentId) {
-    await supabase.from('payments').delete().eq('id', paymentId)
-    loadData()
+ async function deletePayment(paymentId) {
+  const payment = payments.find(p => p.id === paymentId)
+  await supabase.from('payments').delete().eq('id', paymentId)
+  if (payment?.bill_id) {
+    await supabase.from('bills').update({ status: 'pending' }).eq('id', payment.bill_id)
+    toast.success('Payment deleted & bill reverted to pending')
+  } else {
+    toast.success('Payment deleted')
   }
+  loadData()
+}
 
   async function getEstimate() {
     setLoadingEstimate(true)
@@ -649,10 +705,19 @@ console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: $
                 <label className="form-label">METHOD</label>
                 <input className="form-input" value={paymentForm.payment_method} onChange={e => setPaymentForm(f => ({ ...f, payment_method: e.target.value }))} />
               </div>
-              <div className="form-group" style={{ gridColumn: 'span 2' }}>
-                <label className="form-label">NOTES</label>
-                <input className="form-input" placeholder="e.g. Parcela 2/6, Medição março…" value={paymentForm.notes} onChange={e => setPaymentForm(f => ({ ...f, notes: e.target.value }))} />
-              </div>
+             <div className="form-group">
+  <label className="form-label">NOTES</label>
+  <input className="form-input" placeholder="e.g. Parcela 2/6, Medição março…" value={paymentForm.notes} onChange={e => setPaymentForm(f => ({ ...f, notes: e.target.value }))} />
+</div>
+<div className="form-group">
+  <label className="form-label">LINKED BILL (optional)</label>
+  <select className="form-select" value={paymentForm.bill_id} onChange={e => setPaymentForm(f => ({ ...f, bill_id: e.target.value }))}>
+    <option value="">Auto-match by amount</option>
+    {pendingBills.map(b => (
+      <option key={b.id} value={b.id}>{b.contractor_name} — {fmt(b.total_amount)} — due {fmtDate(b.due_date)}</option>
+    ))}
+  </select>
+</div>
             </div>
             <div style={{ display: 'flex', gap: '0.5rem' }}>
               <button className="btn btn-primary" type="submit">Record Payment</button>
@@ -896,8 +961,47 @@ console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: $
 
       {/* PENDING BILLS TAB */}
       {activeTab === 'pending' && (
-        <div>
-          {pendingBills.length === 0 ? (
+  <div>
+    {/* Contractor Budgets */}
+    <div className="card" style={{ marginBottom: '1rem' }}>
+      <div className="card-title">💰 Sub-contract Budgets</div>
+      {contractorBudgets.length > 0 && (
+        <div style={{ marginBottom: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          {contractorBudgets.map(cb => {
+            const spent = bills.filter(b => b.contractor_name?.toLowerCase() === cb.contractor_name.toLowerCase()).reduce((s, b) => s + b.total_amount, 0)
+            const pct = Math.min(spent / cb.budget_amount * 100, 100)
+            const isOver = spent > cb.budget_amount
+            return (
+              <div key={cb.id}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: '0.25rem' }}>
+                  <span>{cb.contractor_name}</span>
+                  <span style={{ color: isOver ? '#e05c6a' : '#8a8090' }}>{fmt(spent)} / {fmt(cb.budget_amount)}{isOver ? ' 🚨 OVER' : ''}</span>
+                </div>
+                <div style={{ height: '4px', background: '#1a1a2c', borderRadius: '4px' }}>
+                  <div style={{ height: '100%', width: `${pct}%`, background: isOver ? '#e05c6a' : 'linear-gradient(90deg, #c8a96e, #4caf88)', borderRadius: '4px' }} />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <input className="form-input" placeholder="Contractor name" id="budget-name" style={{ flex: 2, fontSize: '0.82rem' }} />
+        <input className="form-input" placeholder="Budget (R$)" id="budget-amount" type="number" style={{ flex: 1, fontSize: '0.82rem' }} />
+        <button className="btn btn-ghost" style={{ fontSize: '0.78rem' }} onClick={async () => {
+          const name = document.getElementById('budget-name').value.trim()
+          const amount = +document.getElementById('budget-amount').value
+          if (!name || !amount) return
+          await supabase.from('contractor_budgets').upsert({ project_id: id, contractor_name: name, budget_amount: amount }, { onConflict: 'project_id,contractor_name' })
+          toast.success('Budget saved')
+          document.getElementById('budget-name').value = ''
+          document.getElementById('budget-amount').value = ''
+          loadData()
+        }}>+ Add Budget</button>
+      </div>
+    </div>
+
+    {pendingBills.length === 0 ? (
             <div className="card"><div className="empty-state"><div className="empty-icon">✅</div><div className="empty-text">No pending bills</div></div></div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
