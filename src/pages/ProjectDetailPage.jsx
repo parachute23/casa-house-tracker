@@ -1053,10 +1053,19 @@ console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: $
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.4rem', marginLeft: '1rem' }}>
                         <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '1.2rem', color: '#c8a96e' }}>{fmt(bill.total_amount)}</span>
                         {bill.drive_file_url && <a href={bill.drive_file_url} target="_blank" rel="noreferrer" style={{ color: '#8a8090', fontSize: '0.75rem' }}>📄 View</a>}
-                        <button className="btn btn-ghost" style={{ fontSize: '0.75rem', padding: '0.25rem 0.75rem' }}
+                      <button className="btn btn-ghost" style={{ fontSize: '0.75rem', padding: '0.25rem 0.75rem' }}
   onClick={async () => {
     await supabase.from('bills').update({ status: 'paid' }).eq('id', bill.id)
-    toast.success('Marked as paid')
+    await supabase.from('payments').insert({
+      project_id: bill.project_id,
+      amount: bill.total_amount,
+      payment_date: format(new Date(), 'yyyy-MM-dd'),
+      payment_method: bill.notes?.match(/BOLETO/i) ? 'BOLETO' : bill.notes?.match(/PIX/i) ? 'PIX' : 'TED',
+      notes: `${bill.contractor_name}${bill.bill_number ? ` · NF ${bill.bill_number}` : ''}`,
+      paid_by: user?.id || null,
+      bill_id: bill.id
+    })
+    toast.success('Marked as paid & payment recorded')
     loadData()
   }}>
   ✅ Mark paid
