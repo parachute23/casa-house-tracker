@@ -591,8 +591,8 @@ console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: $
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <button className="btn btn-ghost" onClick={() => { setShowExpenseForm(!showExpenseForm); setShowPaymentForm(false) }}>
-            <Plus size={15} /> Add Expense
-          </button>
+  <Plus size={15} /> Add Bill
+</button>
           <button className="btn btn-primary" onClick={() => { setShowPaymentForm(!showPaymentForm); setShowExpenseForm(false) }}>
             <Plus size={15} /> Log Payment
           </button>
@@ -745,7 +745,7 @@ console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: $
       {/* Add Expense Form */}
       {showExpenseForm && (
         <div className="card" style={{ marginBottom: '1.5rem', border: '1px solid rgba(232,168,76,0.3)' }}>
-          <div className="card-title">🧾 Add Expense / Invoice</div>
+          <div className="card-title">🧾 Add Bill</div>
           <div {...billDropzone.getRootProps()} style={{ border: `2px dashed ${billDropzone.isDragActive ? '#c8a96e' : 'rgba(200,169,110,0.25)'}`, borderRadius: '10px', padding: '1.5rem', textAlign: 'center', cursor: 'pointer', marginBottom: '1rem' }}>
             <input {...billDropzone.getInputProps()} />
             {billFile ? (
