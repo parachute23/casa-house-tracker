@@ -300,11 +300,11 @@ console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: $
 
     // Budget warning for protocolo items
       const itemBudget = contractorBudgets.find(cb =>
-        cb.contractor_name.toLowerCase() === item.supplier?.toLowerCase()
+        cb.contractor_name.toLowerCase().includes(item.supplier?.toLowerCase()) || item.supplier?.toLowerCase().includes(cb.contractor_name.toLowerCase())
       )
       if (itemBudget) {
         const alreadyBilled = bills
-          .filter(b => b.contractor_name?.toLowerCase() === item.supplier?.toLowerCase())
+          .filter(b => b.contractor_name?.toLowerCase().includes(item.supplier?.toLowerCase()) || item.supplier?.toLowerCase().includes(b.contractor_name?.toLowerCase()))
           .reduce((s, b) => s + b.total_amount, 0)
         const newTotal = alreadyBilled + item.amount
         if (newTotal > itemBudget.budget_amount) {
@@ -488,11 +488,11 @@ console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: $
 
   // Budget warning check
   const budget = contractorBudgets.find(cb =>
-    cb.contractor_name.toLowerCase() === expenseForm.contractor_name?.toLowerCase()
+    cb.contractor_name.toLowerCase().includes(expenseForm.contractor_name?.toLowerCase()) || expenseForm.contractor_name?.toLowerCase().includes(cb.contractor_name.toLowerCase())
   )
   if (budget) {
     const alreadyBilled = bills
-      .filter(b => b.contractor_name?.toLowerCase() === expenseForm.contractor_name?.toLowerCase())
+      .filter(b => b.contractor_name?.toLowerCase().includes(expenseForm.contractor_name?.toLowerCase()) || expenseForm.contractor_name?.toLowerCase().includes(b.contractor_name?.toLowerCase()))
       .reduce((s, b) => s + b.total_amount, 0)
     const newTotal = alreadyBilled + +expenseForm.total_amount
     if (newTotal > budget.budget_amount) {
@@ -970,7 +970,7 @@ console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: $
       {contractorBudgets.length > 0 && (
         <div style={{ marginBottom: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {contractorBudgets.map(cb => {
-            const spent = bills.filter(b => b.contractor_name?.toLowerCase() === cb.contractor_name.toLowerCase()).reduce((s, b) => s + b.total_amount, 0)
+            const spent = bills.filter(b => b.contractor_name?.toLowerCase().includes(cb.contractor_name.toLowerCase()) || cb.contractor_name.toLowerCase().includes(b.contractor_name?.toLowerCase())).reduce((s, b) => s + b.total_amount, 0)
             const pct = Math.min(spent / cb.budget_amount * 100, 100)
             const isOver = spent > cb.budget_amount
             return (
