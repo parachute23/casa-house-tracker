@@ -279,9 +279,22 @@ console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: $
         continue
       }
 
-      // For A VENCER items: save as pending bill as before
+// For A VENCER items: check for duplicate first
+      const { data: existingBills } = await supabase
+        .from('bills')
+        .select('id')
+        .eq('project_id', item.project_id_override || id)
+        .eq('contractor_name', item.supplier)
+        .eq('total_amount', item.amount)
+        .eq('due_date', item.due_date)
+      
+      if (existingBills && existingBills.length > 0) {
+        console.log(`Skipping duplicate bill for ${item.supplier} ${item.amount}`)
+        continue
+      }
+
       let boleto_drive_url = null
-      let nf_drive_url = null
+        let nf_drive_url = null
 
       if (item.boleto_file && project.drive_folder_id) {
         try {
