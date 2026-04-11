@@ -85,7 +85,7 @@ const [showWhatsApp, setShowWhatsApp] = useState(false)
   const [allProjects, setAllProjects] = useState([])
   const [contractorBudgets, setContractorBudgets] = useState([])
 
- const [paymentForm, setPaymentForm] = useState({
+const [paymentForm, setPaymentForm] = useState({
   amount: '', payment_date: format(new Date(), 'yyyy-MM-dd'),
   notes: '', paid_by: '', payment_method: 'PIX', bill_id: ''
 })
@@ -721,6 +721,25 @@ console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: $
                 <input className="form-input" value={paymentForm.payment_method} onChange={e => setPaymentForm(f => ({ ...f, payment_method: e.target.value }))} />
               </div>
              <div className="form-group">
+  <label className="form-label">LINK TO BILL (optional)</label>
+  <select className="form-select" value={paymentForm.bill_id} onChange={e => {
+    const bill = bills.find(b => b.id === e.target.value)
+    setPaymentForm(f => ({
+      ...f,
+      bill_id: e.target.value,
+      amount: bill ? bill.total_amount : f.amount,
+      notes: bill ? bill.contractor_name + (bill.notes ? ' · ' + bill.notes : '') : f.notes
+    }))
+  }}>
+    <option value="">No bill linked</option>
+    {bills.filter(b => b.status === 'pending').map(b => (
+      <option key={b.id} value={b.id}>
+        {b.contractor_name} — R$ {b.total_amount.toLocaleString('pt-BR')} {b.due_date ? `(due ${fmtDate(b.due_date)})` : ''}
+      </option>
+    ))}
+  </select>
+</div>
+<div className="form-group">
   <label className="form-label">NOTES</label>
   <input className="form-input" placeholder="e.g. Parcela 2/6, Medição março…" value={paymentForm.notes} onChange={e => setPaymentForm(f => ({ ...f, notes: e.target.value }))} />
 </div>
