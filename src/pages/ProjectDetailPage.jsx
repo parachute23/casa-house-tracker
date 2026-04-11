@@ -73,6 +73,8 @@ export default function ProjectDetailPage() {
   const [processingReceipt, setProcessingReceipt] = useState(false)
   const [estimate, setEstimate] = useState(null)
   const [loadingEstimate, setLoadingEstimate] = useState(false)
+  const [markPaidBill, setMarkPaidBill] = useState(null)
+const [markPaidForm, setMarkPaidForm] = useState({ paid_by: '', payment_date: format(new Date(), 'yyyy-MM-dd') })
 
   // Protocolo state
   const [protocoloFiles, setProtocoloFiles] = useState([])
@@ -1072,20 +1074,9 @@ console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: $
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.4rem', marginLeft: '1rem' }}>
                         <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '1.2rem', color: '#c8a96e' }}>{fmt(bill.total_amount)}</span>
                         {bill.drive_file_url && <a href={bill.drive_file_url} target="_blank" rel="noreferrer" style={{ color: '#8a8090', fontSize: '0.75rem' }}>📄 View</a>}
-                      <button className="btn btn-ghost" style={{ fontSize: '0.75rem', padding: '0.25rem 0.75rem' }}
-  onClick={async () => {
-    await supabase.from('bills').update({ status: 'paid' }).eq('id', bill.id)
-    await supabase.from('payments').insert({
-      project_id: bill.project_id,
-      amount: bill.total_amount,
-      payment_date: format(new Date(), 'yyyy-MM-dd'),
-      payment_method: bill.notes?.match(/BOLETO/i) ? 'BOLETO' : bill.notes?.match(/PIX/i) ? 'PIX' : 'TED',
-      notes: `${bill.contractor_name}${bill.bill_number ? ` · NF ${bill.bill_number}` : ''}`,
-      paid_by: user?.id || null,
-      bill_id: bill.id
-    })
-    toast.success('Marked as paid & payment recorded')
-    loadData()
+                     <button className="btn btn-ghost" style={{ fontSize: '0.75rem', padding: '0.25rem 0.75rem' }}
+  onClick={() => {
+    setMarkPaidBill(bill)
   }}>
   ✅ Mark paid
 </button>
@@ -1183,6 +1174,46 @@ console.log(`[payment] ${item.supplier} → file: ${fileToRead?.name}, boleto: $
           )}
         </div>
       )}
+    {/* Mark Paid Modal */}
+{markPaidBill && (
+  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+    <div className="card" style={{ width: '100%', maxWidth: '400px', margin: '1rem' }}>
+      <div className="card-title">✅ Mark as Paid — {markPaidBill.contractor_name}</div>
+      <div style={{ color: '#c8a96e', fontFamily: "'Cormorant Garamond', serif", fontSize: '1.3rem', marginBottom: '1rem' }}>{fmt(markPaidBill.total_amount)}</div>
+      <div className="form-group" style={{ marginBottom: '1rem' }}>
+        <label className="form-label">PAID BY</label>
+        <select className="form-select" value={markPaidForm.paid_by} onChange={e => setMarkPaidForm(f => ({ ...f, paid_by: e.target.value }))}>
+          <option value="">Select…</option>
+          {profiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+        </select>
+      </div>
+      <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+        <label className="form-label">PAYMENT DATE</label>
+        <input className="form-input" type="date" value={markPaidForm.payment_date} onChange={e => setMarkPaidForm(f => ({ ...f, payment_date: e.target.value }))} />
+      </div>
+      <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <button className="btn btn-primary" disabled={!markPaidForm.paid_by} onClick={async () => {
+          await supabase.from('bills').update({ status: 'paid' }).eq('id', markPaidBill.id)
+          await supabase.from('payments').insert({
+            project_id: markPaidBill.project_id,
+            amount: markPaidBill.total_amount,
+            payment_date: markPaidForm.payment_date,
+            payment_method: markPaidBill.notes?.match(/BOLETO/i) ? 'BOLETO' : markPaidBill.notes?.match(/PIX/i) ? 'PIX' : 'TED',
+            notes: `${markPaidBill.contractor_name}${markPaidBill.bill_number ? ` · NF ${markPaidBill.bill_number}` : ''}`,
+            paid_by: markPaidForm.paid_by,
+            bill_id: markPaidBill.id
+          })
+          toast.success('Payment recorded!')
+          setMarkPaidBill(null)
+          setMarkPaidForm({ paid_by: '', payment_date: format(new Date(), 'yyyy-MM-dd') })
+          loadData()
+        }}>Confirm</button>
+        <button className="btn btn-ghost" onClick={() => setMarkPaidBill(null)}>Cancel</button>
+      </div>
+    </div>
+  </div>
+)}
+    
     </div>
   )
 }
